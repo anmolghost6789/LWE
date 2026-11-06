@@ -5,13 +5,15 @@ import { Aurora } from '../components/Aurora'
 import { Button } from '../components/Button'
 import { Container } from '../components/Container'
 import { hero } from '../content'
+import { useAuth } from '../context/AuthContext'
 
 const ease = [0.22, 1, 0.36, 1] as const
 
 export function Hero() {
+  const { isAuthenticated, openJoinCohort, openDashboard } = useAuth()
   const [line1, line2] = hero.title
   return (
-    <section className="relative overflow-hidden pt-36 pb-10 sm:pt-44">
+    <section className="relative overflow-hidden pt-36 pb-20 sm:pt-44 sm:pb-28">
       <Aurora />
       <div aria-hidden className="grid-lines absolute inset-x-0 top-0 h-[720px]" />
       <div aria-hidden className="noise pointer-events-none absolute inset-0" />
@@ -58,8 +60,18 @@ export function Hero() {
             transition={{ duration: 0.8, delay: 0.3, ease }}
             className="mt-8 flex w-full flex-col items-center gap-3 sm:w-auto sm:flex-row"
           >
-            <Button size="lg" href={hero.primary.href} className="w-full sm:w-auto">
-              {hero.primary.label}
+            <Button
+              size="lg"
+              onClick={() => {
+                if (isAuthenticated) {
+                  openDashboard()
+                } else {
+                  openJoinCohort('bootcamp_full')
+                }
+              }}
+              className="w-full sm:w-auto cursor-pointer"
+            >
+              {isAuthenticated ? 'View My Dashboard' : hero.primary.label}
               <ArrowRight />
             </Button>
             <Button size="lg" variant="secondary" href={hero.secondary.href} className="w-full sm:w-auto">
@@ -75,39 +87,6 @@ export function Hero() {
             {hero.footnote}
           </motion.p>
         </div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 40, rotateX: 12 }}
-          animate={{ opacity: 1, y: 0, rotateX: 0 }}
-          transition={{ duration: 1.1, delay: 0.35, ease }}
-          style={{ transformPerspective: 1400 }}
-          className="relative mx-auto mt-16 max-w-[1040px] sm:mt-20"
-        >
-          <div
-            aria-hidden
-            className="absolute -inset-x-10 -top-10 bottom-0 -z-10 rounded-[40px] bg-[radial-gradient(60%_50%_at_50%_0%,rgb(255_122_69/0.22),transparent)] blur-2xl"
-          />
-          {/* A real room, not a diagram: this is what a Thursday actually looks like. */}
-          <figure className="depth relative overflow-hidden rounded-window bg-surface shadow-glow">
-            <div className="relative aspect-[16/11] sm:aspect-[16/9]">
-              <img
-                src="/hero-expert.jpg"
-                alt="An instructor standing at a table, walking four colleagues through a step on a laptop during a small workshop"
-                className="size-full object-cover object-[50%_35%]"
-              />
-              <div aria-hidden className="absolute inset-0 bg-gradient-to-t from-bg via-bg/20 to-transparent" />
-              <span className="depth absolute left-4 top-4 inline-flex items-center gap-2 rounded-[12px] bg-bg/60 px-3 py-1.5 text-[12px] text-fg backdrop-blur">
-                <span className="round size-1.5 bg-accent" />
-                Live · week 2 of 6
-              </span>
-              <figcaption className="absolute inset-x-4 bottom-4 text-[13px] text-fg/90">
-                <span className="font-medium">Six people, one screen, ninety minutes.</span>{' '}
-                <span className="text-muted">Tonight we fix Priya’s invoice extractor.</span>
-              </figcaption>
-            </div>
-          </figure>
-          <div aria-hidden className="pointer-events-none absolute inset-x-0 -bottom-px h-40 bg-gradient-to-t from-bg to-transparent" />
-        </motion.div>
       </Container>
     </section>
   )

@@ -1,4 +1,9 @@
-import { Contact } from './sections/Contact'
+import { AuthProvider, useAuth } from './context/AuthContext'
+import { Auth0BridgeProvider } from './context/Auth0Bridge'
+import { AdminDashboard } from './components/AdminDashboard'
+import { AuthModal } from './components/AuthModal'
+import { JoinCohortModal } from './components/JoinCohortModal'
+import { StudentDashboardModal } from './components/StudentDashboardModal'
 import { Cta } from './sections/Cta'
 import { Faq } from './sections/Faq'
 import { Features } from './sections/Features'
@@ -13,12 +18,12 @@ import { Steps } from './sections/Steps'
 import { Testimonials } from './sections/Testimonials'
 import { Transformation } from './sections/Transformation'
 
-// The page is a stack of independent sections. Remove or reorder freely;
-// copy for each lives in src/content.ts.
-export function App() {
+function AppContent() {
+  const { isAuthModalOpen, authModalMode, closeAuthModal, openAuthModal } = useAuth()
+
   return (
     <>
-      <Nav />
+      <Nav onOpenAuth={openAuthModal} />
       <main>
         <Hero />
         <LogoCloud />
@@ -28,12 +33,33 @@ export function App() {
         <Transformation />
         <Metrics />
         <Testimonials />
-        <Pricing />
+        <Pricing onOpenAuth={openAuthModal} />
         <Faq />
-        <Contact />
         <Cta />
       </main>
       <Footer />
+
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        initialMode={authModalMode}
+        onClose={closeAuthModal}
+      />
+
+      <JoinCohortModal />
+
+      <StudentDashboardModal />
+
+      <AdminDashboard />
     </>
+  )
+}
+
+export function App() {
+  return (
+    <Auth0BridgeProvider>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </Auth0BridgeProvider>
   )
 }

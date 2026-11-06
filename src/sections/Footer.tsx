@@ -1,6 +1,8 @@
 import { Container } from '../components/Container'
 import { Logo } from '../components/Logo'
 import { footer } from '../content'
+import { useAuth } from '../context/AuthContext'
+import { Shield } from 'lucide-react'
 
 const socials = [
   {
@@ -18,6 +20,7 @@ const socials = [
 ]
 
 export function Footer() {
+  const { openAdminPortal } = useAuth()
   return (
     <footer className="pb-10 pt-20">
       <Container>
@@ -45,7 +48,17 @@ export function Footer() {
           ))}
         </div>
         <div className="mt-16 flex flex-col-reverse items-start justify-between gap-4 border-t border-line pt-6 sm:flex-row sm:items-center">
-          <p className="text-[13px] text-faint">{footer.legal}</p>
+          <div className="flex items-center gap-3">
+            <p className="text-[13px] text-faint">{footer.legal}</p>
+            <span className="text-line">•</span>
+            <button
+              type="button"
+              onClick={openAdminPortal}
+              className="inline-flex items-center gap-1 text-[12px] text-muted/70 hover:text-accent transition-colors cursor-pointer"
+            >
+              <Shield className="size-3" /> Staff & Admin
+            </button>
+          </div>
           <div className="flex items-center gap-1">
             {socials.map((s) => (
               <a

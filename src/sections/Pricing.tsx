@@ -7,9 +7,15 @@ import { Container } from '../components/Container'
 import { Reveal } from '../components/Reveal'
 import { SectionHeading } from '../components/SectionHeading'
 import { pricing } from '../content'
+import { useAuth } from '../context/AuthContext'
 import { cx } from '../lib/cx'
 
-export function Pricing() {
+interface PricingProps {
+  onOpenAuth?: (mode: 'signin' | 'register') => void
+}
+
+export function Pricing({ onOpenAuth: _ }: PricingProps) {
+  const { openJoinCohort } = useAuth()
   const [yearly, setYearly] = useState(true)
   return (
     <section id="pricing" className="scroll-mt-24 border-t border-line py-24 sm:py-32">
@@ -47,6 +53,7 @@ export function Pricing() {
         <div className="mt-10 grid gap-4 lg:grid-cols-3">
           {pricing.tiers.map((tier, i) => {
             const price = yearly ? tier.yearly : tier.monthly
+            const originalPrice = yearly ? tier.originalYearly : tier.originalMonthly
             return (
               <Reveal key={tier.name} delay={i * 0.08} className="h-full">
                 <article
@@ -55,21 +62,48 @@ export function Pricing() {
                     tier.popular ? '[--depth-edge:rgb(255_122_69/0.45)] [--depth-highlight:rgb(255_181_71/0.25)] shadow-[0_40px_80px_-40px_rgb(255_122_69/0.35)]' : 'shadow-glow',
                   )}
                 >
-                  {tier.popular && (
-                    <span className="absolute right-6 top-6 rounded-[8px] bg-accent/15 px-2 py-1 text-[12px] font-medium text-accent">Popular</span>
+                  {tier.badge && (
+                    <span
+                      className={cx(
+                        'absolute right-6 top-6 rounded-[8px] px-2.5 py-1 text-[11.5px] font-medium tracking-tight',
+                        tier.popular
+                          ? 'border border-accent/30 bg-accent/15 text-accent shadow-[0_0_12px_rgba(255,122,69,0.2)]'
+                          : 'border border-line bg-surface-2/80 text-muted',
+                      )}
+                    >
+                      {tier.badge}
+                    </span>
                   )}
                   <h3 className="text-[16px] font-semibold">{tier.name}</h3>
                   <p className="mt-1 min-h-[44px] text-[14px] leading-snug text-muted">{tier.description}</p>
-                  <div className="mt-6 flex flex-wrap items-baseline gap-1.5">
+                  <div className="mt-6 flex flex-wrap items-baseline gap-2">
                     <span className="text-[36px] font-semibold leading-none tracking-[-0.03em] tabular-nums sm:text-[42px]">
                       {pricing.currency ?? '₹'}{price.toLocaleString('en-IN')}
                     </span>
-                    <span className="text-[14px] text-muted">{tier.unit[yearly ? 'yearly' : 'monthly']}</span>
+                    {originalPrice !== undefined && originalPrice > 0 && (
+                      <span className="text-[17px] text-faint line-through tabular-nums decoration-faint/60">
+                        {pricing.currency ?? '₹'}{originalPrice.toLocaleString('en-IN')}
+                      </span>
+                    )}
+                    <span className="text-[13px] text-muted">{tier.unit[yearly ? 'yearly' : 'monthly']}</span>
                   </div>
+                  {tier.popular && (
+                    <p className="mt-2 text-[12px] text-accent-2 font-medium">
+                      ✨ ₹1,666/session · Live 90-min expert builds
+                    </p>
+                  )}
                   <Button
                     variant={tier.popular ? 'primary' : 'secondary'}
-                    className="mt-7 w-full"
-                    href={tier.cta === 'Talk to us' ? '#contact' : '#cta'}
+                    className="mt-7 w-full cursor-pointer"
+                    onClick={() => {
+                      if (tier.name === 'Recordings') {
+                        openJoinCohort('recordings')
+                      } else if (tier.name === 'Team') {
+                        openJoinCohort('team')
+                      } else {
+                        openJoinCohort(yearly ? 'bootcamp_full' : 'bootcamp_instalment')
+                      }
+                    }}
                   >
                     {tier.cta}
                   </Button>
