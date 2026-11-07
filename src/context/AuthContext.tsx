@@ -203,7 +203,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         data = JSON.parse(text) as ApiResponse
       } catch {
-        return { ok: false, error: `Server returned an invalid response (${res.status}).` }
+        return { ok: false, error: `Server error (${res.status}): ${text.slice(0, 150) || 'Invalid response'}` }
       }
 
       if (!res.ok || !data.ok || !data.user || !data.token) {
@@ -243,7 +243,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         data = JSON.parse(text) as ApiResponse
       } catch {
-        return { ok: false, error: `Server returned an invalid response (${res.status}).` }
+        return { ok: false, error: `Server error (${res.status}): ${text.slice(0, 150) || 'Invalid response'}` }
       }
 
       if (!res.ok || !data.ok || !data.user || !data.token) {
@@ -278,7 +278,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         resData = JSON.parse(text) as ApiResponse
       } catch {
-        return { ok: false, error: `Server returned an invalid response (${res.status}).` }
+        return { ok: false, error: `Server error (${res.status}): ${text.slice(0, 150) || 'Invalid response'}` }
       }
 
       if (!res.ok || !resData.ok || !resData.enrolment || !resData.user || !resData.token) {
