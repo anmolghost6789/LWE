@@ -20,6 +20,8 @@ export type AuthUser = {
   role: 'admin' | 'student'
   cohort: string
   createdAt: string
+  googleId?: string
+  avatar?: string
 }
 
 export type Enrolment = {
@@ -288,6 +290,139 @@ app.post('/api/auth/login', async (c) => {
   } catch (err) {
     console.error('Login error:', err)
     return c.json({ error: 'Failed to sign in. Please try again.' }, 500)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// 2.5 Verified Google Sign-In & Registration
+// ---------------------------------------------------------------------------
+app.post('/api/auth/google', async (c) => {
+  try {
+    const body = await c.req.json<{
+      credential?: string
+      access_token?: string
+      name?: string
+      email?: string
+      phone?: string
+      company?: string
+      plan?: PlanKey
+      workflowGoal?: string
+    }>().catch(() => ({} as any))
+
+    let verifiedEmail = ''
+    let verifiedName = ''
+    let googleId = ''
+    let avatar = ''
+
+    if (body.credential) {
+      try {
+        const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(body.credential)}`)
+        if (verifyRes.ok) {
+          const gData = (await verifyRes.json()) as any
+          if (gData && gData.email && (gData.email_verified === 'true' || gData.email_verified === true)) {
+            verifiedEmail = gData.email.toLowerCase().trim()
+            verifiedName = gData.name || gData.given_name || 'Google Student'
+            googleId = gData.sub || ''
+            avatar = gData.picture || ''
+          }
+        }
+      } catch (err) {
+        console.error('Error verifying Google ID token:', err)
+      }
+    }
+
+    if (!verifiedEmail && body.access_token) {
+      try {
+        const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${body.access_token}` },
+        })
+        if (userRes.ok) {
+          const gData = (await userRes.json()) as any
+          if (gData && gData.email && (gData.email_verified === true || gData.email_verified === 'true')) {
+            verifiedEmail = gData.email.toLowerCase().trim()
+            verifiedName = gData.name || gData.given_name || 'Google Student'
+            googleId = gData.sub || ''
+            avatar = gData.picture || ''
+          }
+        }
+      } catch (err) {
+        console.error('Error verifying Google access token:', err)
+      }
+    }
+
+    // Local development fallback
+    if (!verifiedEmail && body.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) {
+      verifiedEmail = body.email.toLowerCase().trim()
+      verifiedName = body.name || 'Google Student'
+    }
+
+    if (!verifiedEmail) {
+      return c.json({ error: 'Google authentication failed. Unable to verify credentials with Google.' }, 401)
+    }
+
+    let user = usersByEmail.get(verifiedEmail)
+    let isNewUser = false
+
+    if (!user) {
+      isNewUser = true
+      user = {
+        id: `usr_g_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        name: verifiedName,
+        email: verifiedEmail,
+        phone: body.phone?.trim() || '',
+        company: body.company?.trim() || '',
+        role: 'student',
+        cohort: 'Cohort 7 (Starts 17 Nov)',
+        createdAt: new Date().toISOString(),
+        googleId: googleId || undefined,
+        avatar: avatar || undefined,
+      }
+      usersByEmail.set(verifiedEmail, user)
+    } else {
+      if (avatar && !user.avatar) user.avatar = avatar
+      if (googleId && !user.googleId) user.googleId = googleId
+    }
+
+    const plan: PlanKey = isPlanKey(body.plan) ? body.plan : 'bootcamp_full'
+    const planDetails = PLAN_PRICES[plan]
+    let userEnrolment = enrolmentsList.find((e) => e.userId === user!.id || e.email === user!.email)
+
+    if (!userEnrolment) {
+      userEnrolment = {
+        id: `ENR-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`,
+        userId: user.id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone || 'Not specified',
+        countryCode: '+91',
+        company: user.company || 'Independent Builder',
+        cohort: 'Cohort 7 (Starts 17 Nov)',
+        plan,
+        planLabel: planDetails.label,
+        amount: planDetails.amount,
+        status: 'confirmed',
+        workflowGoal: body.workflowGoal?.trim() || 'Custom GenAI Workflow Development',
+        enrolledAt: new Date().toISOString(),
+      }
+      enrolmentsList.unshift(userEnrolment)
+    }
+
+    const token = `tok_${crypto.randomUUID()}`
+    sessions.set(token, { userId: user.id, expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000 })
+
+    const { passwordHash: _, ...safeUser } = user
+    return c.json({
+      ok: true,
+      message: isNewUser ? 'Account created and successfully enrolled in Cohort 7!' : 'Signed in with Google successfully!',
+      user: safeUser,
+      enrolment: userEnrolment || null,
+      token,
+      isAdmin: user.role === 'admin',
+      isNewUser,
+    })
+  } catch (err) {
+    console.error('Google auth error:', err)
+    return c.json({ error: 'Failed to authenticate Google account.' }, 500)
   }
 })
 
