@@ -74,11 +74,11 @@ export function StudentDashboardModal() {
 
   const liveMeetingUrl = 'https://meet.google.com/new'
   const calendarEventUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
-    'LWE Cohort 7: Live Workflow Architecture & Evals (Session 2)'
+    'LWE Cohort 7: Live Kickoff & Architecture Session'
   )}&details=${encodeURIComponent(
-    '6-week GenAI Bootcamp Live Session with Engineer.\nTarget: Live Workflow Architecture & Prompt Evals.\nMeeting link: ' +
+    '6-week GenAI Bootcamp Live Kickoff Session with Engineer.\nScope: System Architecture, Workflow Scaffolding & Prompt Evaluation.\nMeeting link: ' +
       liveMeetingUrl
-  )}&dates=20261119T133000Z/20261119T150000Z`
+  )}&dates=20261117T133000Z/20261117T150000Z`
 
   const handleCopyLink = () => {
     navigator.clipboard?.writeText(liveMeetingUrl)
@@ -195,12 +195,12 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
               className="mt-6"
             >
               <div className="flex items-center justify-between">
-                <span className="inline-flex items-center gap-2 rounded-full bg-red-500/15 border border-red-500/30 px-3 py-1 text-[12px] font-semibold text-red-400">
-                  <span className="size-2 rounded-full bg-red-500 animate-ping" />
+                <span className="inline-flex items-center gap-2 rounded-full bg-emerald-500/15 border border-emerald-500/30 px-3 py-1 text-[12px] font-semibold text-emerald-400">
+                  <span className="size-2 rounded-full bg-emerald-400 animate-ping" />
                   Live Classroom Room Active
                 </span>
                 <span className="text-[12.5px] text-muted flex items-center gap-1.5">
-                  <Clock className="size-3.5 text-accent" /> Thursday 7:00 PM IST (90 Mins)
+                  <Clock className="size-3.5 text-accent" /> Monday, 17 Nov · 7:00 PM IST (90 Mins)
                 </span>
               </div>
 
@@ -210,7 +210,7 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
                   <div className="size-16 rounded-full bg-accent/20 border border-accent/30 grid place-items-center text-accent mb-3 animate-pulse">
                     <Radio className="size-8 text-accent" />
                   </div>
-                  <h4 className="text-[18px] font-semibold text-fg">Week 2: Live Workflow Architecture & Evals</h4>
+                  <h4 className="text-[18px] font-semibold text-fg">Cohort 7: Live Kickoff & Architecture Session</h4>
                   <p className="text-[13px] text-muted mt-1 max-w-md">
                     Instructor: Lead GenAI Engineer · Screen Share & Interactive Student Debugging Room
                   </p>
@@ -273,7 +273,7 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
                 </div>
 
                 <div className="mt-3 flex items-center justify-between text-[12px] text-muted pt-2 border-t border-line/60">
-                  <span>Room ID: <code className="text-accent font-mono">lwe-c7-architecture</code></span>
+                  <span>Room ID: <code className="text-accent font-mono">lwe-c7-kickoff</code></span>
                   <a
                     href={calendarEventUrl}
                     target="_blank"
@@ -505,49 +505,69 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
                     <span className="inline-flex items-center gap-1.5 text-[12px] text-accent font-medium">
-                      <span className="round size-1.5 bg-accent" />
-                      Live Bootcamp Status
+                      <span className="size-2 rounded-full bg-emerald-400 animate-pulse" />
+                      Live Bootcamp Status · {user.cohort || 'Cohort 7 (Starts 17 Nov)'}
                     </span>
                     <h4 className="text-[17px] font-semibold text-fg mt-1">
-                      Week 2 of 6: Live Workflow Architecture & Evals
+                      Week 1 of 6: Scope, Live Architecture & Kickoff
                     </h4>
-                    <p className="text-[13px] text-muted mt-0.5 flex items-center gap-2">
-                      <Clock className="size-3.5 text-accent-2" /> Next live call: Thursday 7:00 PM IST (90 mins)
+                    <p className="text-[13px] text-muted mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                      <span className="flex items-center gap-1.5 text-accent-2 font-medium">
+                        <Clock className="size-3.5" /> Next live call: Monday, 17 Nov · 7:00 PM IST (90 mins)
+                      </span>
+                      <span className="text-white/20 hidden sm:inline">•</span>
+                      <span className="text-white/70 text-[12px] flex items-center gap-1">
+                        <Video className="size-3 text-emerald-400" /> Google Meet Live Room
+                      </span>
                     </p>
                   </div>
 
-                  {/* ACTIVE JOIN LIVE ROOM BUTTON */}
-                  <button
-                    type="button"
-                    onClick={() => setActiveView('live_room')}
-                    className="inline-flex items-center justify-center gap-2 rounded-[12px] bg-fg px-4 py-2.5 text-[13px] font-semibold text-bg hover:bg-white transition-all shadow-[0_4px_16px_rgba(255,255,255,0.2)] cursor-pointer hover:scale-[1.02]"
-                  >
-                    <Video className="size-4 text-accent fill-accent" /> Join Live Room
-                  </button>
+                  {/* ACTIVE JOIN LIVE ROOM BUTTON GROUP */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <a
+                      href={liveMeetingUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center gap-2 rounded-[12px] bg-fg px-4 py-2.5 text-[13px] font-semibold text-bg hover:bg-white transition-all shadow-[0_4px_16px_rgba(255,255,255,0.2)] cursor-pointer hover:scale-[1.02]"
+                    >
+                      <Video className="size-4 text-accent fill-accent" /> Join Live Room
+                      <ExternalLink className="size-3.5 opacity-60 text-bg" />
+                    </a>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveView('live_room')}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-[12px] bg-white/[0.06] hover:bg-white/[0.12] border border-line px-3 py-2.5 text-[12px] font-medium text-fg transition-all"
+                      title="Classroom Details, Mic/Cam Test & Calendar"
+                    >
+                      <Calendar className="size-3.5 text-accent" />
+                      Schedule
+                    </button>
+                  </div>
                 </div>
 
                 {/* Step progress bar */}
                 <div className="mt-5 grid grid-cols-6 gap-2">
                   {[
-                    { week: 'W1', title: 'Scope & Data', done: true },
-                    { week: 'W2', title: 'Architecture', active: true },
-                    { week: 'W3', title: 'Prompt & Chain', done: false },
-                    { week: 'W4', title: 'Guardrails', done: false },
-                    { week: 'W5', title: 'Evals & Tuning', done: false },
-                    { week: 'W6', title: 'Production Ship', done: false },
+                    { week: 'W1', title: 'Scope & Setup', active: true, done: false },
+                    { week: 'W2', title: 'Architecture', active: false, done: false },
+                    { week: 'W3', title: 'Prompt & Chain', active: false, done: false },
+                    { week: 'W4', title: 'Guardrails', active: false, done: false },
+                    { week: 'W5', title: 'Evals & Tuning', active: false, done: false },
+                    { week: 'W6', title: 'Production Ship', active: false, done: false },
                   ].map((step) => (
                     <div key={step.week} className="flex flex-col gap-1.5">
                       <div
                         className={cx(
-                          'h-1.5 rounded-full',
+                          'h-1.5 rounded-full transition-all',
                           step.done
                             ? 'bg-accent'
                             : step.active
-                            ? 'bg-accent-2 animate-pulse'
+                            ? 'bg-accent-2 animate-pulse shadow-[0_0_8px_rgba(255,184,0,0.6)]'
                             : 'bg-white/10'
                         )}
                       />
-                      <span className="text-[10.5px] text-muted truncate">
+                      <span className={cx('text-[10.5px] truncate font-medium', step.active ? 'text-accent-2' : 'text-muted')}>
                         {step.week}: {step.title}
                       </span>
                     </div>
