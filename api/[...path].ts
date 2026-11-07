@@ -886,6 +886,7 @@ export default async function handler(req: any, res?: any) {
       phone?: string
       countryCode?: string
       company?: string
+      password?: string
       plan?: string
       workflowGoal?: string
     }>(req)
@@ -895,49 +896,69 @@ export default async function handler(req: any, res?: any) {
     const phone = body.phone?.trim() ?? ''
     const countryCode = body.countryCode?.trim() || '+91'
     const company = body.company?.trim() || 'Independent Builder'
+    const password = body.password ?? ''
     const planKey = (body.plan && PLAN_PRICES[body.plan]) ? body.plan : 'bootcamp_full'
     const planDetails = PLAN_PRICES[planKey]
     const workflowGoal = body.workflowGoal?.trim() || 'Custom GenAI Workflow Development'
     const enrolmentId = `ENR-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`
+    const token = generateToken()
+    const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000
 
     if (!name || name.length < 2) return sendJson(res, 400, { error: 'Please enter your full name.' })
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return sendJson(res, 400, { error: 'Please enter a valid email.' })
 
     if (isNeonReady) {
-      let rows = await sql`SELECT id FROM users WHERE email = ${email} LIMIT 1`
-      let userId = rows[0]?.id
-      if (!userId) {
+      let rows = await sql`SELECT * FROM users WHERE email = ${email} LIMIT 1`
+      let user = rows[0]
+      let userId = user?.id
+
+      if (!user) {
         userId = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+        const passwordHash = password ? hashPassword(password) : null
         await sql`
-          INSERT INTO users (id, name, email, phone, company, role, cohort, created_at)
-          VALUES (${userId}, ${name}, ${email}, ${phone}, ${company}, 'student', 'Cohort 7 (Starts 17 Nov)', NOW())
+          INSERT INTO users (id, name, email, phone, company, password_hash, role, cohort, created_at)
+          VALUES (${userId}, ${name}, ${email}, ${phone}, ${company}, ${passwordHash}, 'student', 'Cohort 7 (Starts 17 Nov)', NOW())
         `
+        const uRows = await sql`SELECT * FROM users WHERE id = ${userId} LIMIT 1`
+        user = uRows[0]
+      } else if (password && !user.password_hash) {
+        const passwordHash = hashPassword(password)
+        await sql`UPDATE users SET password_hash = ${passwordHash} WHERE id = ${user.id}`
+        user.password_hash = passwordHash
       }
 
+      // Create session
+      await sql`INSERT INTO sessions (token, user_id, expires_at) VALUES (${token}, ${userId}, ${expiresAt})`
+
+      // Create enrolment
       await sql`
         INSERT INTO enrolments (id, user_id, name, email, phone, country_code, company, cohort, plan, plan_label, amount, status, workflow_goal, enrolled_at)
         VALUES (${enrolmentId}, ${userId}, ${name}, ${email}, ${phone || 'Not specified'}, ${countryCode}, ${company}, 'Cohort 7 (Starts 17 Nov)', ${planKey}, ${planDetails.label}, ${planDetails.amount}, 'confirmed', ${workflowGoal}, NOW())
       `
 
+      const enrolmentObj = {
+        id: enrolmentId,
+        userId,
+        name,
+        email,
+        phone: phone || 'Not specified',
+        countryCode,
+        company,
+        cohort: 'Cohort 7 (Starts 17 Nov)',
+        plan: planKey,
+        planLabel: planDetails.label,
+        amount: planDetails.amount,
+        status: 'confirmed',
+        workflowGoal,
+        enrolledAt: new Date().toISOString(),
+      }
+
       return sendJson(res, 200, {
         ok: true,
         message: 'Enrolment confirmed successfully!',
-        enrolment: {
-          id: enrolmentId,
-          userId,
-          name,
-          email,
-          phone: phone || 'Not specified',
-          countryCode,
-          company,
-          cohort: 'Cohort 7 (Starts 17 Nov)',
-          plan: planKey,
-          planLabel: planDetails.label,
-          amount: planDetails.amount,
-          status: 'confirmed',
-          workflowGoal,
-          enrolledAt: new Date().toISOString(),
-        },
+        enrolment: enrolmentObj,
+        user: sanitizeUser(user),
+        token,
       })
     }
 
@@ -951,11 +972,14 @@ export default async function handler(req: any, res?: any) {
         email,
         phone,
         company,
+        passwordHash: password ? hashPassword(password) : undefined,
         role: 'student',
         cohort: 'Cohort 7 (Starts 17 Nov)',
         createdAt: new Date().toISOString(),
       }
       fallback.users[email] = user
+    } else if (password && !user.passwordHash) {
+      user.passwordHash = hashPassword(password)
     }
 
     const newEnrolment: Enrolment = {
@@ -976,12 +1000,15 @@ export default async function handler(req: any, res?: any) {
     }
 
     fallback.enrolments.unshift(newEnrolment)
+    fallback.sessions[token] = { userId: user.id, expiresAt }
     await saveFallbackDatabase(fallback)
 
     return sendJson(res, 200, {
       ok: true,
       message: 'Enrolment confirmed successfully!',
       enrolment: newEnrolment,
+      user: sanitizeUser(user),
+      token,
     })
   }
 

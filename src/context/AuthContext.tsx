@@ -291,17 +291,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { ok: false, error: `Server error (${res.status}): ${text.slice(0, 150) || 'Invalid response'}` }
       }
 
-      if (!res.ok || !resData.ok || !resData.enrolment || !resData.user || !resData.token) {
+      if (!res.ok || !resData.ok || !resData.enrolment) {
         return { ok: false, error: resData.error || 'Failed to process enrolment.' }
       }
 
-      setUser(resData.user)
-      setEnrolment(resData.enrolment)
-      setToken(resData.token)
-
-      localStorage.setItem(TOKEN_KEY, resData.token)
-      localStorage.setItem(USER_KEY, JSON.stringify(resData.user))
-      localStorage.setItem(ENROLMENT_KEY, JSON.stringify(resData.enrolment))
+      if (resData.user) {
+        setUser(resData.user)
+        localStorage.setItem(USER_KEY, JSON.stringify(resData.user))
+      }
+      if (resData.token) {
+        setToken(resData.token)
+        localStorage.setItem(TOKEN_KEY, resData.token)
+      }
+      if (resData.enrolment) {
+        setEnrolment(resData.enrolment)
+        localStorage.setItem(ENROLMENT_KEY, JSON.stringify(resData.enrolment))
+      }
 
       return { ok: true, enrolment: resData.enrolment }
     } catch {
