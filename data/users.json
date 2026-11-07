@@ -1,0 +1,13 @@
+{
+  "admin@learnwithexpert.com": {
+    "id": "usr_admin_master",
+    "name": "Admin · LearnWithExpert",
+    "email": "admin@learnwithexpert.com",
+    "phone": "+91 98765 43210",
+    "company": "LearnWithExpert Staff",
+    "passwordHash": "b64bae5a1b38e48cd31eecc7e90d5033e9060da39265d80bd3ec7d8c4ae0c9b1",
+    "role": "admin",
+    "cohort": "Staff / Administration",
+    "createdAt": "2026-01-01T00:00:00.000Z"
+  }
+}

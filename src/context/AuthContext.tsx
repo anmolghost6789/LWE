@@ -198,7 +198,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, rememberMe }),
       })
-      const data = (await res.json()) as ApiResponse
+      let data: ApiResponse
+      try {
+        data = (await res.json()) as ApiResponse
+      } catch {
+        return { ok: false, error: `Server returned an invalid response (${res.status}).` }
+      }
 
       if (!res.ok || !data.ok || !data.user || !data.token) {
         return { ok: false, error: data.error || 'Failed to sign in. Please check your credentials.' }
@@ -232,7 +237,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email, password, phone, company, plan: 'bootcamp_full' }),
       })
-      const data = (await res.json()) as ApiResponse
+      let data: ApiResponse
+      try {
+        data = (await res.json()) as ApiResponse
+      } catch {
+        return { ok: false, error: `Server returned an invalid response (${res.status}).` }
+      }
 
       if (!res.ok || !data.ok || !data.user || !data.token) {
         return { ok: false, error: data.error || 'Failed to complete registration.' }
@@ -261,7 +271,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       })
-      const resData = (await res.json()) as ApiResponse
+      let resData: ApiResponse
+      try {
+        resData = (await res.json()) as ApiResponse
+      } catch {
+        return { ok: false, error: `Server returned an invalid response (${res.status}).` }
+      }
 
       if (!res.ok || !resData.ok || !resData.enrolment || !resData.user || !resData.token) {
         return { ok: false, error: resData.error || 'Failed to process enrolment.' }
