@@ -10,11 +10,14 @@ import {
   Download,
   ExternalLink,
   FileText,
+  GitBranch,
   LogOut,
   Mic,
   Play,
   Radio,
+  Save,
   Sparkles,
+  Terminal,
   Users,
   Video,
   VideoOff,
@@ -23,17 +26,42 @@ import {
 import { useAuth } from '../context/AuthContext'
 import { cx } from '../lib/cx'
 
-type ActiveView = 'overview' | 'live_room' | 'recording' | 'slack'
+type ActiveView = 'overview' | 'live_room' | 'recording' | 'slack' | 'repo'
 
 export function StudentDashboardModal() {
   const { user, enrolment, isDashboardOpen, closeDashboard, logout } = useAuth()
   const [activeView, setActiveView] = useState<ActiveView>('overview')
   const [isCopied, setIsCopied] = useState(false)
+  const [cloneCopied, setCloneCopied] = useState(false)
   const [micActive, setMicActive] = useState(true)
   const [cameraActive, setCameraActive] = useState(true)
   const [recordingPlaying, setRecordingPlaying] = useState(false)
+  const [studentRepoUrl, setStudentRepoUrl] = useState(() => {
+    try {
+      return localStorage.getItem('lwe_student_repo_' + (user?.id || '')) || ''
+    } catch {
+      return ''
+    }
+  })
+  const [repoSaved, setRepoSaved] = useState(false)
 
   if (!isDashboardOpen || !user) return null
+
+  const scaffoldCloneCmd = 'git clone https://github.com/learnwithexpert/genai-workflow-scaffold.git'
+
+  const handleCopyClone = () => {
+    navigator.clipboard?.writeText(scaffoldCloneCmd)
+    setCloneCopied(true)
+    setTimeout(() => setCloneCopied(false), 2500)
+  }
+
+  const handleSaveStudentRepo = () => {
+    try {
+      localStorage.setItem('lwe_student_repo_' + user.id, studentRepoUrl.trim())
+      setRepoSaved(true)
+      setTimeout(() => setRepoSaved(false), 2500)
+    } catch {}
+  }
 
   const getInitials = (name: string) => {
     return name
@@ -364,6 +392,107 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
             </motion.div>
           )}
 
+          {/* VIEW 4: GENAI PROJECT REPOSITORY SCAFFOLD */}
+          {activeView === 'repo' && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="mt-6"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[13px] font-medium text-accent-2 flex items-center gap-2">
+                  <Code2 className="size-4" /> Cohort 7: GenAI Workflow Scaffold & Reviews
+                </span>
+                <span className="text-[12px] text-muted flex items-center gap-1 font-mono">
+                  <GitBranch className="size-3 text-accent" /> main branch template
+                </span>
+              </div>
+
+              <div className="rounded-card-sm bg-surface-2 border border-line p-5">
+                <h4 className="text-[16px] font-semibold text-fg">Official Bootcamp Starter Scaffold</h4>
+                <p className="text-[13px] text-muted mt-1 leading-relaxed">
+                  Your project starting point pre-configured with LangChain / LlamaIndex, LiteLLM orchestration, automated prompt evals, and production Docker setup.
+                </p>
+
+                {/* Clone Terminal Box */}
+                <div className="mt-4 rounded-[10px] bg-black/70 border border-line-strong p-3.5 flex items-center justify-between gap-3 font-mono text-[12.5px] text-fg/90">
+                  <div className="flex items-center gap-2 overflow-x-auto truncate">
+                    <Terminal className="size-4 text-accent shrink-0" />
+                    <span className="text-muted shrink-0">$</span>
+                    <span className="truncate select-all text-emerald-400">{scaffoldCloneCmd}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCopyClone}
+                    className="shrink-0 inline-flex items-center gap-1.5 rounded-[8px] bg-white/[0.08] hover:bg-white/[0.15] px-2.5 py-1 text-[11.5px] font-sans text-fg transition-colors"
+                  >
+                    {cloneCopied ? <Check className="size-3.5 text-emerald-400" /> : <Copy className="size-3.5 text-muted" />}
+                    {cloneCopied ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
+
+                {/* File Architecture Preview */}
+                <div className="mt-4 grid sm:grid-cols-2 gap-2 text-[12px]">
+                  <div className="p-2.5 rounded-[8px] bg-surface border border-line">
+                    <p className="font-mono text-accent font-semibold">📁 src/workflow.py</p>
+                    <p className="text-muted mt-0.5">Core streaming chain & human-in-the-loop review logic</p>
+                  </div>
+                  <div className="p-2.5 rounded-[8px] bg-surface border border-line">
+                    <p className="font-mono text-accent-2 font-semibold">📁 evals/rubrics.json</p>
+                    <p className="text-muted mt-0.5">Automated prompt accuracy & hallucination tests</p>
+                  </div>
+                  <div className="p-2.5 rounded-[8px] bg-surface border border-line">
+                    <p className="font-mono text-emerald-400 font-semibold">📁 guardrails/moderation.py</p>
+                    <p className="text-muted mt-0.5">Input sanitization & PII redaction layer</p>
+                  </div>
+                  <div className="p-2.5 rounded-[8px] bg-surface border border-line">
+                    <p className="font-mono text-purple-400 font-semibold">📁 docker-compose.yml</p>
+                    <p className="text-muted mt-0.5">Ready for deployment to Railway / AWS</p>
+                  </div>
+                </div>
+
+                {/* Student's Custom GitHub Repo Input for Instructor PR Reviews */}
+                <div className="mt-5 pt-4 border-t border-line">
+                  <label className="block text-[13px] font-semibold text-fg">
+                    Your Personal GitHub Project Repository:
+                  </label>
+                  <p className="text-[12px] text-muted mt-0.5">
+                    Link your cloned repo here so your instructor can review your pull requests and architecture during Thursday calls.
+                  </p>
+                  <div className="mt-2.5 flex items-center gap-2">
+                    <input
+                      type="url"
+                      value={studentRepoUrl}
+                      onChange={(e) => setStudentRepoUrl(e.target.value)}
+                      placeholder="https://github.com/your-username/my-genai-workflow"
+                      className="flex-1 rounded-[10px] bg-surface border border-line px-3.5 py-2 text-[13px] text-fg placeholder:text-muted/60 focus:border-accent focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSaveStudentRepo}
+                      className="inline-flex items-center gap-1.5 rounded-[10px] bg-accent px-4 py-2 text-[13px] font-semibold text-bg hover:bg-accent-2 transition-colors cursor-pointer shrink-0"
+                    >
+                      {repoSaved ? <Check className="size-4" /> : <Save className="size-4" />}
+                      {repoSaved ? 'Saved!' : 'Save Repo'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex items-center justify-between text-[12px] pt-3 border-t border-line/60">
+                  <span className="text-muted">Target: <strong className="text-fg">{enrolment?.workflowGoal || 'Custom GenAI Workflow'}</strong></span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveView('overview')}
+                    className="text-accent hover:underline font-medium"
+                  >
+                    Back to Dashboard
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
           {/* VIEW 0: MAIN DASHBOARD OVERVIEW */}
           {activeView === 'overview' && (
             <>
@@ -468,10 +597,8 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
                   </div>
 
                   {/* Resource 2: Project GitHub Repo */}
-                  <a
-                    href="https://github.com/anmolghost6789/LWE"
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <div
+                    onClick={() => setActiveView('repo')}
                     className="flex items-center justify-between p-3.5 rounded-[12px] bg-surface-2/40 border border-line hover:border-accent-2/40 hover:bg-surface-2/70 transition-all cursor-pointer group"
                   >
                     <div className="flex items-center gap-3">
@@ -480,13 +607,13 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
                       </div>
                       <div>
                         <p className="text-[13px] font-medium text-fg group-hover:text-accent-2 transition-colors">Project GitHub Repo</p>
-                        <p className="text-[11px] text-muted">Private repository scaffold</p>
+                        <p className="text-[11px] text-muted">Bootcamp starter scaffold & reviews</p>
                       </div>
                     </div>
                     <span className="text-[12px] text-accent font-medium group-hover:underline inline-flex items-center gap-1">
-                      Open <ExternalLink className="size-3" />
+                      Open <Code2 className="size-3" />
                     </span>
-                  </a>
+                  </div>
 
                   {/* Resource 3: Prompt Eval Worksheets */}
                   <div
