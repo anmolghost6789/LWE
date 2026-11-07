@@ -4,10 +4,13 @@ declare global {
   }
 }
 
-export const GOOGLE_CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID || '')
-  .trim()
-  .replace(/^["']|["']$/g, '')
-  .trim()
+export const DEFAULT_GOOGLE_CLIENT_ID = '180168466535-b3tfatatv651eisq9bjj54m05bjidcjf.apps.googleusercontent.com'
+
+const rawEnvClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID || '').trim().replace(/^["']|["']$/g, '').trim()
+
+export const GOOGLE_CLIENT_ID = (!rawEnvClientId || rawEnvClientId.includes('your-') || rawEnvClientId.includes('placeholder'))
+  ? DEFAULT_GOOGLE_CLIENT_ID
+  : rawEnvClientId
 
 export function isGoogleOAuthConfigured(): boolean {
   return Boolean(
