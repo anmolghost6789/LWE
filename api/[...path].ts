@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import os from 'node:os'
+import { neon } from '@neondatabase/serverless'
 
 // ---------------------------------------------------------------------------
 // Types & Models
@@ -57,10 +58,110 @@ const PLAN_PRICES: Record<string, { label: string; amount: number }> = {
 }
 
 const ADMIN_EMAIL = 'admin@learnwithexpert.com'
-const DEFAULT_GOOGLE_CLIENT_ID = '180168466535-b3tfatatv651eisq9bjj54m05bjidcjf.apps.googleusercontent.com'
+const ADMIN_PASSWORD_HASH = 'b64bae5a1b38e48cd31eecc7e90d5033e9060da39265d80bd3ec7d8c4ae0c9b1' // Hash of Admin@2026!Expert
 
 // ---------------------------------------------------------------------------
-// In-Memory Global Store (Shared across all requests in this Lambda container)
+// Neon PostgreSQL Database Connection
+// ---------------------------------------------------------------------------
+function getDatabaseUrl(): string | null {
+  const url = process.env.DATABASE_URL || process.env.POSTGRES_URL
+  if (url && (url.startsWith('postgres://') || url.startsWith('postgresql://'))) {
+    return url
+  }
+  return null
+}
+
+let sqlClient: any = null
+let tablesInitialized = false
+
+function getSqlClient() {
+  const url = getDatabaseUrl()
+  if (!url) return null
+  if (!sqlClient) {
+    sqlClient = neon(url)
+  }
+  return sqlClient
+}
+
+async function ensureNeonTables(): Promise<boolean> {
+  const sql = getSqlClient()
+  if (!sql) return false
+  if (tablesInitialized) return true
+
+  try {
+    // 1. Create Users Table
+    await sql`
+      CREATE TABLE IF NOT EXISTS users (
+        id VARCHAR(64) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        phone VARCHAR(50),
+        company VARCHAR(255),
+        password_hash TEXT,
+        role VARCHAR(20) DEFAULT 'student',
+        cohort VARCHAR(100) DEFAULT 'Cohort 7 (Starts 17 Nov)',
+        google_id VARCHAR(255),
+        avatar TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `
+
+    // 2. Create Sessions Table
+    await sql`
+      CREATE TABLE IF NOT EXISTS sessions (
+        token VARCHAR(128) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        expires_at BIGINT NOT NULL
+      );
+    `
+
+    // 3. Create Enrolments Table
+    await sql`
+      CREATE TABLE IF NOT EXISTS enrolments (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64),
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) NOT NULL,
+        phone VARCHAR(50),
+        country_code VARCHAR(10) DEFAULT '+91',
+        company VARCHAR(255),
+        cohort VARCHAR(100) DEFAULT 'Cohort 7 (Starts 17 Nov)',
+        plan VARCHAR(50) NOT NULL,
+        plan_label VARCHAR(100) NOT NULL,
+        amount INTEGER NOT NULL,
+        status VARCHAR(20) DEFAULT 'confirmed',
+        workflow_goal TEXT,
+        enrolled_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `
+
+    // 4. Ensure master admin user exists in Neon
+    await sql`
+      INSERT INTO users (id, name, email, phone, company, password_hash, role, cohort, created_at)
+      VALUES (
+        'usr_admin_master',
+        'Admin · LearnWithExpert',
+        ${ADMIN_EMAIL},
+        '+91 98765 43210',
+        'LearnWithExpert Staff',
+        ${ADMIN_PASSWORD_HASH},
+        'admin',
+        'Staff / Administration',
+        NOW()
+      )
+      ON CONFLICT (email) DO NOTHING;
+    `
+
+    tablesInitialized = true
+    return true
+  } catch (err) {
+    console.error('Neon table initialization notice:', err)
+    return false
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fallback In-Memory / File Store (Active if DATABASE_URL is not yet configured)
 // ---------------------------------------------------------------------------
 let globalStore: DatabaseState | null = null
 
@@ -69,13 +170,7 @@ function getStoreFilePath(): string {
 }
 
 function loadBaselineSeed(): DatabaseState {
-  const state: DatabaseState = {
-    users: {},
-    sessions: {},
-    enrolments: [],
-  }
-
-  // Load seed users
+  const state: DatabaseState = { users: {}, sessions: {}, enrolments: [] }
   try {
     const seedUsers = path.join(process.cwd(), 'data', 'users.json')
     if (fs.existsSync(seedUsers)) {
@@ -83,7 +178,6 @@ function loadBaselineSeed(): DatabaseState {
     }
   } catch {}
 
-  // Ensure default master admin exists
   if (!state.users[ADMIN_EMAIL]) {
     state.users[ADMIN_EMAIL] = {
       id: 'usr_admin_master',
@@ -91,14 +185,13 @@ function loadBaselineSeed(): DatabaseState {
       email: ADMIN_EMAIL,
       phone: '+91 98765 43210',
       company: 'LearnWithExpert Staff',
-      passwordHash: 'b64bae5a1b38e48cd31eecc7e90d5033e9060da39265d80bd3ec7d8c4ae0c9b1',
+      passwordHash: ADMIN_PASSWORD_HASH,
       role: 'admin',
       cohort: 'Staff / Administration',
       createdAt: '2026-01-01T00:00:00.000Z',
     }
   }
 
-  // Load seed enrolments
   try {
     const seedEnrolments = path.join(process.cwd(), 'data', 'enrolments.json')
     if (fs.existsSync(seedEnrolments)) {
@@ -110,59 +203,9 @@ function loadBaselineSeed(): DatabaseState {
   return state
 }
 
-// ---------------------------------------------------------------------------
-// External Database & Remote KV Integration
-// ---------------------------------------------------------------------------
-function getRemoteKVConfig(): { url: string; token: string } | null {
-  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL
-  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN
-  if (url && token) {
-    return { url: url.replace(/\/$/, ''), token }
-  }
-  return null
-}
-
-async function syncWithRemoteKV(action: 'read' | 'write', state?: DatabaseState): Promise<DatabaseState | null> {
-  const cfg = getRemoteKVConfig()
-  if (!cfg) return null
-
-  try {
-    if (action === 'read') {
-      const res = await fetch(`${cfg.url}/get/lwe_database_state`, {
-        headers: { Authorization: `Bearer ${cfg.token}` },
-      })
-      if (res.ok) {
-        const json: any = await res.json()
-        if (json && json.result) {
-          const parsed = typeof json.result === 'string' ? JSON.parse(json.result) : json.result
-          if (parsed && typeof parsed === 'object') return parsed as DatabaseState
-        }
-      }
-    } else if (action === 'write' && state) {
-      await fetch(`${cfg.url}/set/lwe_database_state`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${cfg.token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(JSON.stringify(state)),
-      })
-    }
-  } catch (err) {
-    console.error('Remote KV sync error:', err)
-  }
-  return null
-}
-
-async function getDatabase(): Promise<DatabaseState> {
-  if (globalStore) {
-    return globalStore
-  }
-
-  // 1. Initialize from baseline seed
+async function getFallbackDatabase(): Promise<DatabaseState> {
+  if (globalStore) return globalStore
   const state = loadBaselineSeed()
-
-  // 2. Overlay from local disk cache (/tmp)
   const localFile = getStoreFilePath()
   try {
     if (fs.existsSync(localFile)) {
@@ -175,42 +218,22 @@ async function getDatabase(): Promise<DatabaseState> {
         }
       }
     }
-  } catch (e) {
-    console.error('Error reading local cache:', e)
-  }
-
-  // 3. Overlay from remote KV if configured
-  const remote = await syncWithRemoteKV('read')
-  if (remote) {
-    state.users = { ...state.users, ...(remote.users || {}) }
-    state.sessions = { ...state.sessions, ...(remote.sessions || {}) }
-    if (Array.isArray(remote.enrolments) && remote.enrolments.length > 0) {
-      state.enrolments = remote.enrolments
-    }
-  }
-
+  } catch {}
   globalStore = state
   return globalStore
 }
 
-async function saveDatabase(state: DatabaseState): Promise<void> {
+async function saveFallbackDatabase(state: DatabaseState): Promise<void> {
   globalStore = state
-
-  // 1. Save to local disk cache (/tmp)
   const localFile = getStoreFilePath()
   try {
     fs.mkdirSync(path.dirname(localFile), { recursive: true })
     fs.writeFileSync(localFile, JSON.stringify(state, null, 2), 'utf-8')
-  } catch (e) {
-    console.error('Error writing local cache:', e)
-  }
-
-  // 2. Asynchronously sync to remote KV if configured
-  syncWithRemoteKV('write', state).catch(() => {})
+  } catch {}
 }
 
 // ---------------------------------------------------------------------------
-// Security & Helpers
+// Security & Utilities
 // ---------------------------------------------------------------------------
 export function hashPassword(password: string): string {
   return crypto.createHash('sha256').update(password + '_lwe_secure_salt_2026').digest('hex')
@@ -233,14 +256,41 @@ export function generateToken(): string {
   return `tok_${crypto.randomBytes(24).toString('hex')}`
 }
 
-function sanitizeUser(user: AuthUser) {
-  const { passwordHash: _, ...safe } = user
-  return safe
+function sanitizeUser(user: any) {
+  const { passwordHash, password_hash, ...safe } = user
+  return {
+    id: safe.id,
+    name: safe.name,
+    email: safe.email,
+    phone: safe.phone,
+    company: safe.company,
+    role: safe.role,
+    cohort: safe.cohort,
+    createdAt: safe.createdAt || safe.created_at,
+    googleId: safe.googleId || safe.google_id,
+    avatar: safe.avatar,
+  }
 }
 
-// ---------------------------------------------------------------------------
-// HTTP Request & Response Utilities
-// ---------------------------------------------------------------------------
+function formatEnrolment(e: any): Enrolment {
+  return {
+    id: e.id,
+    userId: e.userId || e.user_id,
+    name: e.name,
+    email: e.email,
+    phone: e.phone,
+    countryCode: e.countryCode || e.country_code || '+91',
+    company: e.company,
+    cohort: e.cohort,
+    plan: e.plan,
+    planLabel: e.planLabel || e.plan_label,
+    amount: Number(e.amount),
+    status: e.status,
+    workflowGoal: e.workflowGoal || e.workflow_goal,
+    enrolledAt: e.enrolledAt || e.enrolled_at,
+  }
+}
+
 async function parseBody<T = any>(req: any): Promise<T> {
   if (typeof req?.json === 'function') {
     try {
@@ -264,15 +314,9 @@ async function parseBody<T = any>(req: any): Promise<T> {
   if (typeof req?.on === 'function') {
     return new Promise((resolve) => {
       let data = ''
-      req.on('data', (chunk: any) => {
-        data += chunk
-      })
+      req.on('data', (chunk: any) => { data += chunk })
       req.on('end', () => {
-        try {
-          resolve(JSON.parse(data || '{}') as T)
-        } catch {
-          resolve({} as T)
-        }
+        try { resolve(JSON.parse(data || '{}') as T) } catch { resolve({} as T) }
       })
       req.on('error', () => resolve({} as T))
     })
@@ -317,29 +361,6 @@ function getBearerToken(req: any): string | null {
   return null
 }
 
-async function getAuthenticatedUser(req: any, db: DatabaseState): Promise<AuthUser | null> {
-  const token = getBearerToken(req)
-  if (!token) return null
-
-  const session = db.sessions[token]
-  if (!session) return null
-
-  if (session.expiresAt < Date.now()) {
-    delete db.sessions[token]
-    await saveDatabase(db)
-    return null
-  }
-
-  // Find user by session userId
-  for (const user of Object.values(db.users)) {
-    if (user.id === session.userId) return user
-  }
-  return null
-}
-
-// ---------------------------------------------------------------------------
-// Google OAuth Token Verification
-// ---------------------------------------------------------------------------
 async function verifyGoogleToken(credential?: string, accessToken?: string): Promise<{ email: string; name: string } | null> {
   if (credential) {
     try {
@@ -347,10 +368,7 @@ async function verifyGoogleToken(credential?: string, accessToken?: string): Pro
       if (res.ok) {
         const data = (await res.json()) as any
         if (data && data.email && (data.email_verified === 'true' || data.email_verified === true)) {
-          return {
-            email: data.email.toLowerCase().trim(),
-            name: data.name || data.given_name || 'Google Student',
-          }
+          return { email: data.email.toLowerCase().trim(), name: data.name || data.given_name || 'Google Student' }
         }
       }
     } catch {}
@@ -364,15 +382,11 @@ async function verifyGoogleToken(credential?: string, accessToken?: string): Pro
       if (res.ok) {
         const data = (await res.json()) as any
         if (data && data.email && (data.email_verified === true || data.email_verified === 'true')) {
-          return {
-            email: data.email.toLowerCase().trim(),
-            name: data.name || data.given_name || 'Google Student',
-          }
+          return { email: data.email.toLowerCase().trim(), name: data.name || data.given_name || 'Google Student' }
         }
       }
     } catch {}
   }
-
   return null
 }
 
@@ -384,29 +398,43 @@ export default async function handler(req: any, res?: any) {
     return sendJson(res, 204, {})
   }
 
-  // Resolve normalized request pathname
   const rawUrl = req.url || req.headers?.['x-matched-path'] || req.headers?.['x-now-route-matches'] || ''
   let pathname = rawUrl.split('?')[0] || ''
-  
-  // If invoked with query path segments from Vercel rewrite
   if (req.query?.path) {
     const segments = Array.isArray(req.query.path) ? req.query.path : [req.query.path]
     pathname = '/api/' + segments.join('/')
   }
 
-  const db = await getDatabase()
+  const sql = getSqlClient()
+  const isNeonReady = sql ? await ensureNeonTables() : false
 
   // -------------------------------------------------------------------------
   // 1. Health Check: GET /api/health
   // -------------------------------------------------------------------------
   if (pathname === '/api/health' || pathname === '/api') {
+    let usersCount = 0
+    let enrolmentsCount = 0
+
+    if (isNeonReady) {
+      try {
+        const uRes = await sql`SELECT count(*)::int as count FROM users`
+        const eRes = await sql`SELECT count(*)::int as count FROM enrolments`
+        usersCount = uRes[0]?.count || 0
+        enrolmentsCount = eRes[0]?.count || 0
+      } catch {}
+    } else {
+      const fallback = await getFallbackDatabase()
+      usersCount = Object.keys(fallback.users).length
+      enrolmentsCount = fallback.enrolments.length
+    }
+
     return sendJson(res, 200, {
       ok: true,
       service: 'learnwithexpert-api',
       timestamp: new Date().toISOString(),
-      registeredUsersCount: Object.keys(db.users).length,
-      enrolmentsCount: db.enrolments.length,
-      database: getRemoteKVConfig() ? 'remote-kv-active' : 'local-memory-tmp-active',
+      database: isNeonReady ? 'neon-postgresql-active' : 'local-memory-tmp-active',
+      registeredUsersCount: usersCount,
+      enrolmentsCount: enrolmentsCount,
     })
   }
 
@@ -436,24 +464,74 @@ export default async function handler(req: any, res?: any) {
     const workflowGoal = body.workflowGoal?.trim() || 'Custom GenAI Workflow'
     const planKey = (body.plan && PLAN_PRICES[body.plan]) ? body.plan : 'bootcamp_full'
 
-    if (!name || name.length < 2) {
-      return sendJson(res, 400, { error: 'Please enter your full name (minimum 2 characters).' })
-    }
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return sendJson(res, 400, { error: 'Please enter a valid email address.' })
-    }
-    if (!password || password.length < 8) {
-      return sendJson(res, 400, { error: 'Password must be at least 8 characters long.' })
+    if (!name || name.length < 2) return sendJson(res, 400, { error: 'Please enter your full name (minimum 2 characters).' })
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return sendJson(res, 400, { error: 'Please enter a valid email address.' })
+    if (!password || password.length < 8) return sendJson(res, 400, { error: 'Password must be at least 8 characters long.' })
+
+    const passwordHash = hashPassword(password)
+    const userId = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+    const planDetails = PLAN_PRICES[planKey]
+    const enrolmentId = `ENR-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`
+    const token = generateToken()
+    const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000
+
+    if (isNeonReady) {
+      // Check existing in Neon
+      const existing = await sql`SELECT id FROM users WHERE email = ${email} LIMIT 1`
+      if (existing.length > 0) {
+        return sendJson(res, 409, { error: 'An account with this email already exists. Please sign in.' })
+      }
+
+      // Insert User
+      await sql`
+        INSERT INTO users (id, name, email, phone, company, password_hash, role, cohort, created_at)
+        VALUES (${userId}, ${name}, ${email}, ${phone}, ${company || studentRole}, ${passwordHash}, 'student', 'Cohort 7 (Starts 17 Nov)', NOW())
+      `
+
+      // Insert Enrolment
+      await sql`
+        INSERT INTO enrolments (id, user_id, name, email, phone, country_code, company, cohort, plan, plan_label, amount, status, workflow_goal, enrolled_at)
+        VALUES (${enrolmentId}, ${userId}, ${name}, ${email}, ${phone || 'Not specified'}, '+91', ${company || 'Independent Builder'}, 'Cohort 7 (Starts 17 Nov)', ${planKey}, ${planDetails.label}, ${planDetails.amount}, 'confirmed', ${workflowGoal}, NOW())
+      `
+
+      // Insert Session
+      await sql`
+        INSERT INTO sessions (token, user_id, expires_at)
+        VALUES (${token}, ${userId}, ${expiresAt})
+      `
+
+      return sendJson(res, 200, {
+        ok: true,
+        message: 'Account created and successfully enrolled in Cohort 7!',
+        user: { id: userId, name, email, phone, company: company || studentRole, role: 'student', cohort: 'Cohort 7 (Starts 17 Nov)' },
+        enrolment: {
+          id: enrolmentId,
+          userId,
+          name,
+          email,
+          phone: phone || 'Not specified',
+          countryCode: '+91',
+          company: company || 'Independent Builder',
+          cohort: 'Cohort 7 (Starts 17 Nov)',
+          plan: planKey,
+          planLabel: planDetails.label,
+          amount: planDetails.amount,
+          status: 'confirmed',
+          workflowGoal,
+          enrolledAt: new Date().toISOString(),
+        },
+        token,
+      })
     }
 
-    // Check if account already exists
-    if (db.users[email]) {
+    // Fallback store
+    const fallback = await getFallbackDatabase()
+    if (fallback.users[email]) {
       return sendJson(res, 409, { error: 'An account with this email already exists. Please sign in.' })
     }
 
-    const passwordHash = hashPassword(password)
     const newUser: AuthUser = {
-      id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: userId,
       name,
       email,
       phone,
@@ -463,15 +541,11 @@ export default async function handler(req: any, res?: any) {
       cohort: 'Cohort 7 (Starts 17 Nov)',
       createdAt: new Date().toISOString(),
     }
+    fallback.users[email] = newUser
 
-    // Save user
-    db.users[email] = newUser
-
-    // Create Cohort 7 Enrolment
-    const planDetails = PLAN_PRICES[planKey]
     const newEnrolment: Enrolment = {
-      id: `ENR-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`,
-      userId: newUser.id,
+      id: enrolmentId,
+      userId,
       name,
       email,
       phone: phone || 'Not specified',
@@ -485,15 +559,9 @@ export default async function handler(req: any, res?: any) {
       workflowGoal,
       enrolledAt: new Date().toISOString(),
     }
-    db.enrolments.unshift(newEnrolment)
-
-    // Create session token
-    const token = generateToken()
-    const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000 // 30 days
-    db.sessions[token] = { userId: newUser.id, expiresAt }
-
-    // Persist to all storage layers
-    await saveDatabase(db)
+    fallback.enrolments.unshift(newEnrolment)
+    fallback.sessions[token] = { userId, expiresAt }
+    await saveFallbackDatabase(fallback)
 
     return sendJson(res, 200, {
       ok: true,
@@ -514,36 +582,55 @@ export default async function handler(req: any, res?: any) {
     const email = body.email?.trim().toLowerCase() ?? ''
     const password = body.password ?? ''
 
-    if (!email || !password) {
-      return sendJson(res, 400, { error: 'Email and password are required.' })
+    if (!email || !password) return sendJson(res, 400, { error: 'Email and password are required.' })
+
+    const token = generateToken()
+    const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000
+
+    if (isNeonReady) {
+      const rows = await sql`SELECT * FROM users WHERE email = ${email} LIMIT 1`
+      if (rows.length === 0) {
+        return sendJson(res, 401, { error: 'No account found with this email. Please register to create an account and enrol.' })
+      }
+
+      const user = rows[0]
+      if (!user.password_hash) {
+        return sendJson(res, 401, { error: 'This account was created with Google Sign-In. Please click "Sign in with Google".' })
+      }
+
+      if (!safeCompare(hashPassword(password), user.password_hash)) {
+        return sendJson(res, 401, { error: 'Incorrect password. Please try again.' })
+      }
+
+      await sql`INSERT INTO sessions (token, user_id, expires_at) VALUES (${token}, ${user.id}, ${expiresAt})`
+      const enrolments = await sql`SELECT * FROM enrolments WHERE user_id = ${user.id} OR email = ${email} ORDER BY enrolled_at DESC LIMIT 1`
+
+      return sendJson(res, 200, {
+        ok: true,
+        message: 'Signed in successfully.',
+        user: sanitizeUser(user),
+        enrolment: enrolments.length > 0 ? formatEnrolment(enrolments[0]) : null,
+        token,
+        isAdmin: user.role === 'admin',
+      })
     }
 
-    const user = db.users[email]
+    // Fallback store
+    const fallback = await getFallbackDatabase()
+    const user = fallback.users[email]
     if (!user) {
-      return sendJson(res, 401, {
-        error: 'No account found with this email. Please register to create an account and enrol.',
-      })
+      return sendJson(res, 401, { error: 'No account found with this email. Please register to create an account and enrol.' })
     }
-
     if (!user.passwordHash) {
-      return sendJson(res, 401, {
-        error: 'This account was created with Google Sign-In. Please click "Sign in with Google".',
-      })
+      return sendJson(res, 401, { error: 'This account was created with Google Sign-In. Please click "Sign in with Google".' })
     }
-
-    const computedHash = hashPassword(password)
-    if (!safeCompare(computedHash, user.passwordHash)) {
+    if (!safeCompare(hashPassword(password), user.passwordHash)) {
       return sendJson(res, 401, { error: 'Incorrect password. Please try again.' })
     }
 
-    // Create new session token
-    const token = generateToken()
-    const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000 // 30 days
-    db.sessions[token] = { userId: user.id, expiresAt }
-    await saveDatabase(db)
-
-    // Find enrolment if any
-    const enrolment = db.enrolments.find((e) => e.userId === user.id || e.email.toLowerCase() === email) || null
+    fallback.sessions[token] = { userId: user.id, expiresAt }
+    await saveFallbackDatabase(fallback)
+    const enrolment = fallback.enrolments.find((e) => e.userId === user.id || e.email.toLowerCase() === email) || null
 
     return sendJson(res, 200, {
       ok: true,
@@ -556,17 +643,54 @@ export default async function handler(req: any, res?: any) {
   }
 
   // -------------------------------------------------------------------------
-  // 4. Session Verification: GET /api/auth/me
+  // 4. Session Lookup: GET /api/auth/me
   // -------------------------------------------------------------------------
   if (pathname === '/api/auth/me') {
     if (req.method !== 'GET') return sendJson(res, 405, { error: 'Method not allowed' })
+    const token = getBearerToken(req)
+    if (!token) return sendJson(res, 401, { error: 'Authentication required.' })
 
-    const user = await getAuthenticatedUser(req, db)
-    if (!user) {
+    if (isNeonReady) {
+      const rows = await sql`
+        SELECT u.*, s.expires_at 
+        FROM users u 
+        JOIN sessions s ON u.id = s.user_id 
+        WHERE s.token = ${token} 
+        LIMIT 1
+      `
+      if (rows.length === 0 || Number(rows[0].expires_at) < Date.now()) {
+        if (rows.length > 0) {
+          await sql`DELETE FROM sessions WHERE token = ${token}`
+        }
+        return sendJson(res, 401, { error: 'Session expired or invalid. Please sign in again.' })
+      }
+
+      const user = rows[0]
+      const enrolments = await sql`SELECT * FROM enrolments WHERE user_id = ${user.id} OR email = ${user.email} ORDER BY enrolled_at DESC LIMIT 1`
+
+      return sendJson(res, 200, {
+        ok: true,
+        user: sanitizeUser(user),
+        enrolment: enrolments.length > 0 ? formatEnrolment(enrolments[0]) : null,
+        isAdmin: user.role === 'admin',
+      })
+    }
+
+    // Fallback store
+    const fallback = await getFallbackDatabase()
+    const session = fallback.sessions[token]
+    if (!session || session.expiresAt < Date.now()) {
+      if (session) delete fallback.sessions[token]
       return sendJson(res, 401, { error: 'Session expired or invalid. Please sign in again.' })
     }
 
-    const enrolment = db.enrolments.find((e) => e.userId === user.id || e.email.toLowerCase() === user.email.toLowerCase()) || null
+    let user: AuthUser | null = null
+    for (const u of Object.values(fallback.users)) {
+      if (u.id === session.userId) { user = u; break }
+    }
+    if (!user) return sendJson(res, 401, { error: 'User profile not found.' })
+
+    const enrolment = fallback.enrolments.find((e) => e.userId === user?.id || e.email.toLowerCase() === user?.email.toLowerCase()) || null
 
     return sendJson(res, 200, {
       ok: true,
@@ -581,9 +705,16 @@ export default async function handler(req: any, res?: any) {
   // -------------------------------------------------------------------------
   if (pathname === '/api/auth/logout') {
     const token = getBearerToken(req)
-    if (token && db.sessions[token]) {
-      delete db.sessions[token]
-      await saveDatabase(db)
+    if (token) {
+      if (isNeonReady) {
+        await sql`DELETE FROM sessions WHERE token = ${token}`
+      } else {
+        const fallback = await getFallbackDatabase()
+        if (fallback.sessions[token]) {
+          delete fallback.sessions[token]
+          await saveFallbackDatabase(fallback)
+        }
+      }
     }
     return sendJson(res, 200, { ok: true, message: 'Signed out successfully.' })
   }
@@ -606,13 +737,8 @@ export default async function handler(req: any, res?: any) {
     }>(req)
 
     let verified = await verifyGoogleToken(body.credential, body.access_token)
-
-    // Fallback if client sent email directly
     if (!verified && body.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) {
-      verified = {
-        email: body.email.toLowerCase().trim(),
-        name: body.name || body.email.split('@')[0] || 'Google Student',
-      }
+      verified = { email: body.email.toLowerCase().trim(), name: body.name || body.email.split('@')[0] || 'Google Student' }
     }
 
     if (!verified || !verified.email) {
@@ -625,10 +751,74 @@ export default async function handler(req: any, res?: any) {
     const company = body.company?.trim() || ''
     const planKey = (body.plan && PLAN_PRICES[body.plan]) ? body.plan : 'bootcamp_full'
     const workflowGoal = body.workflowGoal?.trim() || 'Custom GenAI Workflow Development'
+    const token = generateToken()
+    const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000
 
-    let user = db.users[email]
+    if (isNeonReady) {
+      const rows = await sql`SELECT * FROM users WHERE email = ${email} LIMIT 1`
+      let user: any = null
+      let isNewUser = false
+
+      if (rows.length === 0) {
+        isNewUser = true
+        const userId = `usr_g_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+        const role = email === ADMIN_EMAIL ? 'admin' : 'student'
+        await sql`
+          INSERT INTO users (id, name, email, phone, company, role, cohort, google_id, created_at)
+          VALUES (${userId}, ${name}, ${email}, ${phone}, ${company}, ${role}, 'Cohort 7 (Starts 17 Nov)', ${'google_' + Date.now()}, NOW())
+        `
+        const newRows = await sql`SELECT * FROM users WHERE id = ${userId} LIMIT 1`
+        user = newRows[0]
+      } else {
+        user = rows[0]
+      }
+
+      // Check enrolment
+      const enrolments = await sql`SELECT * FROM enrolments WHERE user_id = ${user.id} OR email = ${email} LIMIT 1`
+      let enrolment = enrolments.length > 0 ? formatEnrolment(enrolments[0]) : null
+
+      if (!enrolment && user.role !== 'admin') {
+        const planDetails = PLAN_PRICES[planKey]
+        const enrolmentId = `ENR-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`
+        await sql`
+          INSERT INTO enrolments (id, user_id, name, email, phone, country_code, company, cohort, plan, plan_label, amount, status, workflow_goal, enrolled_at)
+          VALUES (${enrolmentId}, ${user.id}, ${user.name}, ${user.email}, ${user.phone || 'Not specified'}, '+91', ${user.company || 'Independent Builder'}, 'Cohort 7 (Starts 17 Nov)', ${planKey}, ${planDetails.label}, ${planDetails.amount}, 'confirmed', ${workflowGoal}, NOW())
+        `
+        enrolment = {
+          id: enrolmentId,
+          userId: user.id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone || 'Not specified',
+          countryCode: '+91',
+          company: user.company || 'Independent Builder',
+          cohort: 'Cohort 7 (Starts 17 Nov)',
+          plan: planKey as any,
+          planLabel: planDetails.label,
+          amount: planDetails.amount,
+          status: 'confirmed',
+          workflowGoal,
+          enrolledAt: new Date().toISOString(),
+        }
+      }
+
+      await sql`INSERT INTO sessions (token, user_id, expires_at) VALUES (${token}, ${user.id}, ${expiresAt})`
+
+      return sendJson(res, 200, {
+        ok: true,
+        message: isNewUser ? 'Account successfully created with Google!' : 'Signed in with Google successfully!',
+        user: sanitizeUser(user),
+        enrolment,
+        token,
+        isAdmin: user.role === 'admin',
+        isNewUser,
+      })
+    }
+
+    // Fallback store
+    const fallback = await getFallbackDatabase()
+    let user = fallback.users[email]
     let isNewUser = false
-
     if (!user) {
       isNewUser = true
       user = {
@@ -642,11 +832,10 @@ export default async function handler(req: any, res?: any) {
         createdAt: new Date().toISOString(),
         googleId: `google_${Date.now()}`,
       }
-      db.users[email] = user
+      fallback.users[email] = user
     }
 
-    // Ensure enrolment exists
-    let enrolment = db.enrolments.find((e) => e.userId === user.id || e.email.toLowerCase() === email)
+    let enrolment = fallback.enrolments.find((e) => e.userId === user.id || e.email.toLowerCase() === email) || null
     if (!enrolment && user.role !== 'admin') {
       const planDetails = PLAN_PRICES[planKey]
       enrolment = {
@@ -665,20 +854,17 @@ export default async function handler(req: any, res?: any) {
         workflowGoal,
         enrolledAt: new Date().toISOString(),
       }
-      db.enrolments.unshift(enrolment)
+      fallback.enrolments.unshift(enrolment)
     }
 
-    // Issue session token
-    const token = generateToken()
-    const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000
-    db.sessions[token] = { userId: user.id, expiresAt }
-    await saveDatabase(db)
+    fallback.sessions[token] = { userId: user.id, expiresAt }
+    await saveFallbackDatabase(fallback)
 
     return sendJson(res, 200, {
       ok: true,
       message: isNewUser ? 'Account successfully created with Google!' : 'Signed in with Google successfully!',
       user: sanitizeUser(user),
-      enrolment: enrolment || null,
+      enrolment,
       token,
       isAdmin: user.role === 'admin',
       isNewUser,
@@ -707,13 +893,54 @@ export default async function handler(req: any, res?: any) {
     const countryCode = body.countryCode?.trim() || '+91'
     const company = body.company?.trim() || 'Independent Builder'
     const planKey = (body.plan && PLAN_PRICES[body.plan]) ? body.plan : 'bootcamp_full'
+    const planDetails = PLAN_PRICES[planKey]
     const workflowGoal = body.workflowGoal?.trim() || 'Custom GenAI Workflow Development'
+    const enrolmentId = `ENR-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`
 
     if (!name || name.length < 2) return sendJson(res, 400, { error: 'Please enter your full name.' })
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return sendJson(res, 400, { error: 'Please enter a valid email.' })
 
-    const planDetails = PLAN_PRICES[planKey]
-    let user = db.users[email]
+    if (isNeonReady) {
+      let rows = await sql`SELECT id FROM users WHERE email = ${email} LIMIT 1`
+      let userId = rows[0]?.id
+      if (!userId) {
+        userId = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+        await sql`
+          INSERT INTO users (id, name, email, phone, company, role, cohort, created_at)
+          VALUES (${userId}, ${name}, ${email}, ${phone}, ${company}, 'student', 'Cohort 7 (Starts 17 Nov)', NOW())
+        `
+      }
+
+      await sql`
+        INSERT INTO enrolments (id, user_id, name, email, phone, country_code, company, cohort, plan, plan_label, amount, status, workflow_goal, enrolled_at)
+        VALUES (${enrolmentId}, ${userId}, ${name}, ${email}, ${phone || 'Not specified'}, ${countryCode}, ${company}, 'Cohort 7 (Starts 17 Nov)', ${planKey}, ${planDetails.label}, ${planDetails.amount}, 'confirmed', ${workflowGoal}, NOW())
+      `
+
+      return sendJson(res, 200, {
+        ok: true,
+        message: 'Enrolment confirmed successfully!',
+        enrolment: {
+          id: enrolmentId,
+          userId,
+          name,
+          email,
+          phone: phone || 'Not specified',
+          countryCode,
+          company,
+          cohort: 'Cohort 7 (Starts 17 Nov)',
+          plan: planKey,
+          planLabel: planDetails.label,
+          amount: planDetails.amount,
+          status: 'confirmed',
+          workflowGoal,
+          enrolledAt: new Date().toISOString(),
+        },
+      })
+    }
+
+    // Fallback store
+    const fallback = await getFallbackDatabase()
+    let user = fallback.users[email]
     if (!user) {
       user = {
         id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -725,11 +952,11 @@ export default async function handler(req: any, res?: any) {
         cohort: 'Cohort 7 (Starts 17 Nov)',
         createdAt: new Date().toISOString(),
       }
-      db.users[email] = user
+      fallback.users[email] = user
     }
 
     const newEnrolment: Enrolment = {
-      id: `ENR-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`,
+      id: enrolmentId,
       userId: user.id,
       name,
       email,
@@ -745,8 +972,8 @@ export default async function handler(req: any, res?: any) {
       enrolledAt: new Date().toISOString(),
     }
 
-    db.enrolments.unshift(newEnrolment)
-    await saveDatabase(db)
+    fallback.enrolments.unshift(newEnrolment)
+    await saveFallbackDatabase(fallback)
 
     return sendJson(res, 200, {
       ok: true,
@@ -760,17 +987,49 @@ export default async function handler(req: any, res?: any) {
   // -------------------------------------------------------------------------
   if (pathname === '/api/admin/enrolments') {
     if (req.method !== 'GET') return sendJson(res, 405, { error: 'Method not allowed' })
+    const token = getBearerToken(req)
+    if (!token) return sendJson(res, 403, { error: 'Admin access required.' })
 
-    const user = await getAuthenticatedUser(req, db)
-    if (!user || user.role !== 'admin') {
-      return sendJson(res, 403, { error: 'Admin access required.' })
+    if (isNeonReady) {
+      const userRows = await sql`
+        SELECT u.role 
+        FROM users u 
+        JOIN sessions s ON u.id = s.user_id 
+        WHERE s.token = ${token} AND s.expires_at > ${Date.now()}
+        LIMIT 1
+      `
+      if (userRows.length === 0 || userRows[0].role !== 'admin') {
+        return sendJson(res, 403, { error: 'Admin access required.' })
+      }
+
+      const rows = await sql`SELECT * FROM enrolments ORDER BY enrolled_at DESC`
+      const enrolments = rows.map(formatEnrolment)
+      const confirmedCount = enrolments.filter((e) => e.status === 'confirmed').length
+      const totalRevenue = enrolments.filter((e) => e.status === 'confirmed').reduce((sum, e) => sum + (e.amount || 0), 0)
+
+      return sendJson(res, 200, {
+        enrolments,
+        total: enrolments.length,
+        stats: {
+          totalEnrolments: enrolments.length,
+          confirmed: confirmedCount,
+          pending: enrolments.filter((e) => e.status === 'pending').length,
+          waitlist: enrolments.filter((e) => e.status === 'waitlist').length,
+          totalRevenue,
+        },
+      })
     }
 
-    const enrolments = db.enrolments
+    // Fallback store
+    const fallback = await getFallbackDatabase()
+    const session = fallback.sessions[token]
+    if (!session || session.expiresAt < Date.now()) return sendJson(res, 403, { error: 'Admin access required.' })
+    const admin = Object.values(fallback.users).find((u) => u.id === session.userId && u.role === 'admin')
+    if (!admin) return sendJson(res, 403, { error: 'Admin access required.' })
+
+    const enrolments = fallback.enrolments
     const confirmedCount = enrolments.filter((e) => e.status === 'confirmed').length
-    const totalRevenue = enrolments
-      .filter((e) => e.status === 'confirmed')
-      .reduce((sum, e) => sum + (e.amount || 0), 0)
+    const totalRevenue = enrolments.filter((e) => e.status === 'confirmed').reduce((sum, e) => sum + (e.amount || 0), 0)
 
     return sendJson(res, 200, {
       enrolments,
@@ -790,29 +1049,61 @@ export default async function handler(req: any, res?: any) {
   // -------------------------------------------------------------------------
   if (pathname.startsWith('/api/admin/enrolments/')) {
     const id = pathname.replace('/api/admin/enrolments/', '').trim()
-    const user = await getAuthenticatedUser(req, db)
-    if (!user || user.role !== 'admin') {
-      return sendJson(res, 403, { error: 'Admin access required.' })
+    const token = getBearerToken(req)
+    if (!token) return sendJson(res, 403, { error: 'Admin access required.' })
+
+    if (isNeonReady) {
+      const userRows = await sql`
+        SELECT u.role 
+        FROM users u 
+        JOIN sessions s ON u.id = s.user_id 
+        WHERE s.token = ${token} AND s.expires_at > ${Date.now()}
+        LIMIT 1
+      `
+      if (userRows.length === 0 || userRows[0].role !== 'admin') {
+        return sendJson(res, 403, { error: 'Admin access required.' })
+      }
+
+      if (req.method === 'PATCH') {
+        const body = await parseBody<{ status?: 'confirmed' | 'pending' | 'waitlist' }>(req)
+        if (body.status && ['confirmed', 'pending', 'waitlist'].includes(body.status)) {
+          const updated = await sql`UPDATE enrolments SET status = ${body.status} WHERE id = ${id} RETURNING *`
+          if (updated.length === 0) return sendJson(res, 404, { error: 'Enrolment not found.' })
+          return sendJson(res, 200, { ok: true, enrolment: formatEnrolment(updated[0]) })
+        }
+        return sendJson(res, 400, { error: 'Invalid status.' })
+      }
+
+      if (req.method === 'DELETE') {
+        await sql`DELETE FROM enrolments WHERE id = ${id}`
+        return sendJson(res, 200, { ok: true, message: 'Enrolment deleted.' })
+      }
+      return sendJson(res, 405, { error: 'Method not allowed' })
     }
 
-    const index = db.enrolments.findIndex((e) => e.id === id)
-    if (index === -1) {
-      return sendJson(res, 404, { error: 'Enrolment not found.' })
-    }
+    // Fallback store
+    const fallback = await getFallbackDatabase()
+    const session = fallback.sessions[token]
+    if (!session || session.expiresAt < Date.now()) return sendJson(res, 403, { error: 'Admin access required.' })
+    const admin = Object.values(fallback.users).find((u) => u.id === session.userId && u.role === 'admin')
+    if (!admin) return sendJson(res, 403, { error: 'Admin access required.' })
+
+    const index = fallback.enrolments.findIndex((e) => e.id === id)
+    if (index === -1) return sendJson(res, 404, { error: 'Enrolment not found.' })
 
     if (req.method === 'PATCH') {
       const body = await parseBody<{ status?: 'confirmed' | 'pending' | 'waitlist' }>(req)
       if (body.status && ['confirmed', 'pending', 'waitlist'].includes(body.status)) {
-        db.enrolments[index].status = body.status
-        await saveDatabase(db)
-        return sendJson(res, 200, { ok: true, enrolment: db.enrolments[index] })
+        fallback.enrolments[index].status = body.status
+        await saveFallbackDatabase(fallback)
+        return sendJson(res, 200, { ok: true, enrolment: fallback.enrolments[index] })
       }
       return sendJson(res, 400, { error: 'Invalid status.' })
     }
 
     if (req.method === 'DELETE') {
-      db.enrolments.splice(index, 1)
-      await saveDatabase(db)
+      fallback.enrolments.splice(index, 1)
+      await saveFallbackDatabase(fallback)
       return sendJson(res, 200, { ok: true, message: 'Enrolment deleted.' })
     }
 
