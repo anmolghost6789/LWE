@@ -4,7 +4,10 @@ declare global {
   }
 }
 
-export const GOOGLE_CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID || '').trim()
+export const GOOGLE_CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID || '')
+  .trim()
+  .replace(/^["']|["']$/g, '')
+  .trim()
 
 export function isGoogleOAuthConfigured(): boolean {
   return Boolean(
