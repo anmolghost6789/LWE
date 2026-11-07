@@ -64,7 +64,10 @@ const ADMIN_PASSWORD_HASH = 'b64bae5a1b38e48cd31eecc7e90d5033e9060da39265d80bd3e
 // Neon PostgreSQL Database Connection
 // ---------------------------------------------------------------------------
 function getDatabaseUrl(): string | null {
-  const url = process.env.DATABASE_URL || process.env.POSTGRES_URL
+  const url = process.env.DATABASE_URL ||
+              process.env.POSTGRES_URL ||
+              process.env.POSTGRES_URL_NON_POOLING ||
+              process.env.POSTGRES_PRISMA_URL
   if (url && (url.startsWith('postgres://') || url.startsWith('postgresql://'))) {
     return url
   }
