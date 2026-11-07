@@ -1,20 +1,37 @@
+import { useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import {
+  ArrowLeft,
+  Calendar,
+  Check,
   Clock,
   Code2,
+  Copy,
   Download,
+  ExternalLink,
   FileText,
   LogOut,
+  Mic,
   Play,
+  Radio,
+  Sparkles,
   Users,
   Video,
+  VideoOff,
   X,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { cx } from '../lib/cx'
 
+type ActiveView = 'overview' | 'live_room' | 'recording' | 'slack'
+
 export function StudentDashboardModal() {
   const { user, enrolment, isDashboardOpen, closeDashboard, logout } = useAuth()
+  const [activeView, setActiveView] = useState<ActiveView>('overview')
+  const [isCopied, setIsCopied] = useState(false)
+  const [micActive, setMicActive] = useState(true)
+  const [cameraActive, setCameraActive] = useState(true)
+  const [recordingPlaying, setRecordingPlaying] = useState(false)
 
   if (!isDashboardOpen || !user) return null
 
@@ -27,17 +44,69 @@ export function StudentDashboardModal() {
       .toUpperCase()
   }
 
+  const liveMeetingUrl = 'https://meet.google.com/new'
+  const calendarEventUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
+    'LWE Cohort 7: Live Workflow Architecture & Evals (Session 2)'
+  )}&details=${encodeURIComponent(
+    '6-week GenAI Bootcamp Live Session with Engineer.\nTarget: Live Workflow Architecture & Prompt Evals.\nMeeting link: ' +
+      liveMeetingUrl
+  )}&dates=20261119T133000Z/20261119T150000Z`
+
+  const handleCopyLink = () => {
+    navigator.clipboard?.writeText(liveMeetingUrl)
+    setIsCopied(true)
+    setTimeout(() => setIsCopied(false), 2500)
+  }
+
+  const handleDownloadWorksheet = () => {
+    const content = `# LWE GenAI Bootcamp - Cohort 7 Prompt Evaluation Worksheet
+Student: ${user.name} (${user.email})
+Target Project: ${enrolment?.workflowGoal || 'Custom GenAI Workflow Development'}
+Official ID: ${enrolment?.id || 'ENR-STUDENT'}
+
+## 1. System Prompt Architecture
+- [ ] Persona & Role definition specified
+- [ ] Explicit output JSON schema defined
+- [ ] 3-shot few-shot examples included
+- [ ] Refusal & Safety Guardrails configured
+
+## 2. Evaluation Suite & Rubrics
+| Test Case ID | Input Test Scenario | Expected Output Schema | Accuracy (1-5) | Latency (ms) | Pass/Fail |
+|---|---|---|---|---|---|
+| TC-01 | Standard Workflow Input | Valid Schema JSON | | | |
+| TC-02 | Edge Case / Empty Payload | Graceful Error Handling | | | |
+| TC-03 | Adversarial / Injection | Strict Guardrail Triggered | | | |
+| TC-04 | Long-context Document (>8k) | Complete Extraction | | | |
+
+## 3. Human-in-the-Loop Review Gate
+- Confidence threshold score: 0.85
+- Approval Channel: Private Slack #cohort-7-approvals
+`
+    const blob = new Blob([content], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `Prompt_Eval_Worksheet_${user.name.replace(/\s+/g, '_')}_Cohort7.md`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
         {/* Backdrop */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          onClick={closeDashboard}
+          onClick={() => {
+            setActiveView('overview')
+            closeDashboard()
+          }}
           aria-hidden
-          className="fixed inset-0 bg-black/80 backdrop-blur-md"
+          className="fixed inset-0 bg-black/85 backdrop-blur-md"
         />
 
         {/* Modal Window */}
@@ -48,175 +117,418 @@ export function StudentDashboardModal() {
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: 12 }}
           transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-          className="depth relative z-10 my-8 w-full max-w-[720px] overflow-hidden rounded-card bg-surface p-6 sm:p-9 shadow-glow border border-line"
+          className="depth relative z-10 my-6 w-full max-w-[760px] overflow-hidden rounded-card bg-surface p-5 sm:p-8 shadow-glow border border-line"
         >
           {/* Header Bar */}
-          <div className="flex items-start justify-between border-b border-line pb-6">
+          <div className="flex items-start justify-between border-b border-line pb-5">
             <div className="flex items-center gap-3.5">
-              <div className="flex size-13 items-center justify-center rounded-full bg-gradient-to-br from-accent to-accent-2 font-semibold text-bg text-[17px] shadow-[0_0_20px_rgba(255,122,69,0.3)]">
+              {activeView !== 'overview' && (
+                <button
+                  type="button"
+                  onClick={() => setActiveView('overview')}
+                  className="mr-1 grid size-8 place-items-center rounded-[8px] bg-white/[0.06] text-fg hover:bg-white/[0.12] transition-colors"
+                  title="Back to Overview"
+                >
+                  <ArrowLeft className="size-4" />
+                </button>
+              )}
+              <div className="flex size-12 items-center justify-center rounded-full bg-gradient-to-br from-accent to-accent-2 font-semibold text-bg text-[16px] shadow-[0_0_20px_rgba(255,122,69,0.3)]">
                 {getInitials(user.name)}
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h3 className="text-[20px] font-semibold text-fg tracking-tight">{user.name}</h3>
+                  <h3 className="text-[19px] font-semibold text-fg tracking-tight">{user.name}</h3>
                   <span className="rounded-[8px] bg-accent/15 px-2 py-0.5 text-[11px] font-medium text-accent border border-accent/25">
                     {user.cohort}
                   </span>
                 </div>
-                <p className="text-[13px] text-muted mt-0.5">{user.email} · {user.role}</p>
+                <p className="text-[12.5px] text-muted mt-0.5">{user.email} · {user.role}</p>
               </div>
             </div>
 
             <button
               type="button"
-              onClick={closeDashboard}
+              onClick={() => {
+                setActiveView('overview')
+                closeDashboard()
+              }}
               className="grid size-8 place-items-center rounded-[10px] text-muted hover:bg-white/[0.08] hover:text-fg transition-colors"
             >
               <X className="size-4" />
             </button>
           </div>
 
-          {/* Active Cohort Progress Card */}
-          <div className="mt-6 rounded-card-sm bg-surface-2/70 p-5 border border-line relative overflow-hidden">
-            <div
-              aria-hidden
-              className="pointer-events-none absolute -right-10 -bottom-10 size-40 rounded-full bg-[radial-gradient(circle,rgb(255_122_69/0.15),transparent_70%)] blur-xl"
-            />
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <span className="inline-flex items-center gap-1.5 text-[12px] text-accent font-medium">
-                  <span className="round size-1.5 bg-accent" />
-                  Live Bootcamp Status
+          {/* VIEW 1: LIVE CLASSROOM & MEETING ROOM */}
+          {activeView === 'live_room' && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="mt-6"
+            >
+              <div className="flex items-center justify-between">
+                <span className="inline-flex items-center gap-2 rounded-full bg-red-500/15 border border-red-500/30 px-3 py-1 text-[12px] font-semibold text-red-400">
+                  <span className="size-2 rounded-full bg-red-500 animate-ping" />
+                  Live Classroom Room Active
                 </span>
-                <h4 className="text-[17px] font-semibold text-fg mt-1">
-                  Week 2 of 6: Live Workflow Architecture & Evals
-                </h4>
-                <p className="text-[13px] text-muted mt-0.5 flex items-center gap-2">
-                  <Clock className="size-3.5 text-accent-2" /> Next live call: Thursday 7:00 PM IST (90 mins)
-                </p>
+                <span className="text-[12.5px] text-muted flex items-center gap-1.5">
+                  <Clock className="size-3.5 text-accent" /> Thursday 7:00 PM IST (90 Mins)
+                </span>
               </div>
 
-              <a
-                href="#how"
-                onClick={closeDashboard}
-                className="inline-flex items-center gap-2 rounded-[12px] bg-fg px-4 py-2.5 text-[13px] font-semibold text-bg hover:bg-white transition-all shadow-[0_4px_16px_rgba(255,255,255,0.2)]"
-              >
-                <Video className="size-4" /> Join Live Room
-              </a>
-            </div>
+              {/* Virtual Classroom Stage */}
+              <div className="mt-4 rounded-card-sm bg-surface-2 border border-line overflow-hidden p-5 relative">
+                <div className="aspect-[16/9] w-full rounded-[10px] bg-black/60 border border-line-strong relative flex flex-col items-center justify-center p-6 text-center overflow-hidden">
+                  <div className="size-16 rounded-full bg-accent/20 border border-accent/30 grid place-items-center text-accent mb-3 animate-pulse">
+                    <Radio className="size-8 text-accent" />
+                  </div>
+                  <h4 className="text-[18px] font-semibold text-fg">Week 2: Live Workflow Architecture & Evals</h4>
+                  <p className="text-[13px] text-muted mt-1 max-w-md">
+                    Instructor: Lead GenAI Engineer · Screen Share & Interactive Student Debugging Room
+                  </p>
 
-            {/* Step progress bar */}
-            <div className="mt-5 grid grid-cols-6 gap-2">
-              {[
-                { week: 'W1', title: 'Scope & Data', done: true },
-                { week: 'W2', title: 'Architecture', active: true },
-                { week: 'W3', title: 'Prompt & Chain', done: false },
-                { week: 'W4', title: 'Guardrails', done: false },
-                { week: 'W5', title: 'Evals & Tuning', done: false },
-                { week: 'W6', title: 'Production Ship', done: false },
-              ].map((step) => (
-                <div key={step.week} className="flex flex-col gap-1.5">
-                  <div
-                    className={cx(
-                      'h-1.5 rounded-full',
-                      step.done
-                        ? 'bg-accent'
-                        : step.active
-                        ? 'bg-accent-2 animate-pulse'
-                        : 'bg-white/10',
-                    )}
-                  />
-                  <span className="text-[10.5px] text-muted truncate">
-                    {step.week}: {step.title}
-                  </span>
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                    <span className="rounded-full bg-surface-2/80 px-2.5 py-1 text-[11px] text-fg/80 border border-line flex items-center gap-1.5">
+                      <Users className="size-3 text-emerald-400" /> 6 seats reserved
+                    </span>
+                    <span className="rounded-full bg-surface-2/80 px-2.5 py-1 text-[11px] text-fg/80 border border-line flex items-center gap-1.5">
+                      <Sparkles className="size-3 text-accent" /> Q&A & Code Review Live
+                    </span>
+                  </div>
+
+                  {/* Media Controls Preview */}
+                  <div className="absolute bottom-4 inset-x-0 flex items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setMicActive(!micActive)}
+                      className={cx(
+                        'size-9 rounded-full grid place-items-center transition-all',
+                        micActive ? 'bg-white/10 text-fg hover:bg-white/20' : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                      )}
+                      title={micActive ? 'Mute Mic' : 'Unmute Mic'}
+                    >
+                      {micActive ? <Mic className="size-4" /> : <Mic className="size-4 line-through" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCameraActive(!cameraActive)}
+                      className={cx(
+                        'size-9 rounded-full grid place-items-center transition-all',
+                        cameraActive ? 'bg-white/10 text-fg hover:bg-white/20' : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                      )}
+                      title={cameraActive ? 'Turn Off Camera' : 'Turn On Camera'}
+                    >
+                      {cameraActive ? <Video className="size-4" /> : <VideoOff className="size-4" />}
+                    </button>
+                  </div>
                 </div>
-              ))}
-            </div>
-          </div>
 
-          {/* Enrolled Workflow Project Scope */}
-          {enrolment && (
-            <div className="mt-4 rounded-card-sm bg-surface-2/40 p-4 border border-line">
-              <div className="flex items-center justify-between text-[12px] text-muted">
-                <span>
-                  Official ID: <strong className="font-mono text-accent">{enrolment.id}</strong> · {enrolment.planLabel}
-                </span>
-                <span className="rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 text-[11px] font-medium capitalize">
-                  {enrolment.status}
-                </span>
+                {/* Primary Launch Buttons */}
+                <div className="mt-5 grid sm:grid-cols-3 gap-2.5">
+                  <a
+                    href={liveMeetingUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="sm:col-span-2 inline-flex items-center justify-center gap-2 rounded-[12px] bg-accent px-5 py-3 text-[14px] font-semibold text-bg hover:bg-accent-2 transition-all shadow-[0_4px_20px_rgba(255_122_69,0.35)]"
+                  >
+                    <Video className="size-4.5" /> Launch Live Room in Google Meet <ExternalLink className="size-3.5 opacity-70" />
+                  </a>
+
+                  <button
+                    type="button"
+                    onClick={handleCopyLink}
+                    className="inline-flex items-center justify-center gap-2 rounded-[12px] bg-surface border border-line px-4 py-3 text-[13px] font-medium text-fg hover:bg-white/[0.08] transition-colors"
+                  >
+                    {isCopied ? <Check className="size-4 text-emerald-400" /> : <Copy className="size-4 text-muted" />}
+                    {isCopied ? 'Link Copied!' : 'Copy Meeting Link'}
+                  </button>
+                </div>
+
+                <div className="mt-3 flex items-center justify-between text-[12px] text-muted pt-2 border-t border-line/60">
+                  <span>Room ID: <code className="text-accent font-mono">lwe-c7-architecture</code></span>
+                  <a
+                    href={calendarEventUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-accent hover:underline font-medium"
+                  >
+                    <Calendar className="size-3.5" /> Add to Google Calendar
+                  </a>
+                </div>
               </div>
-              <h5 className="mt-2 text-[13.5px] font-semibold text-fg">Your Target Project:</h5>
-              <p className="mt-0.5 text-[13px] text-muted leading-relaxed">{enrolment.workflowGoal}</p>
-            </div>
+            </motion.div>
           )}
 
-          {/* Quick Resources & Deliverables */}
-          <div className="mt-6">
-            <h4 className="text-[14px] font-semibold uppercase tracking-wider text-muted mb-3">
-              Cohort Deliverables & Materials
-            </h4>
-            <div className="grid sm:grid-cols-2 gap-3">
-              <div className="flex items-center justify-between p-3.5 rounded-[12px] bg-surface-2/40 border border-line hover:border-line-strong transition-colors">
-                <div className="flex items-center gap-3">
-                  <div className="size-8 rounded-[8px] bg-accent/10 grid place-items-center text-accent">
-                    <Play className="size-4" />
-                  </div>
-                  <div>
-                    <p className="text-[13px] font-medium text-fg">Session 1 Recording</p>
-                    <p className="text-[11px] text-muted">90 mins · Data Preparation</p>
-                  </div>
-                </div>
-                <span className="text-[12px] text-accent font-medium cursor-pointer hover:underline">
-                  Watch
+          {/* VIEW 2: RECORDINGS PLAYER */}
+          {activeView === 'recording' && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="mt-6"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[13px] font-medium text-accent flex items-center gap-2">
+                  <Play className="size-3.5" /> Session 1 Recording (90 mins)
                 </span>
+                <span className="text-[12px] text-muted">Uploaded on Nov 10 · 1080p</span>
               </div>
 
-              <div className="flex items-center justify-between p-3.5 rounded-[12px] bg-surface-2/40 border border-line hover:border-line-strong transition-colors">
-                <div className="flex items-center gap-3">
-                  <div className="size-8 rounded-[8px] bg-accent-2/10 grid place-items-center text-accent-2">
-                    <Code2 className="size-4" />
-                  </div>
-                  <div>
-                    <p className="text-[13px] font-medium text-fg">Project GitHub Repo</p>
-                    <p className="text-[11px] text-muted">Private repository scaffold</p>
-                  </div>
+              <div className="rounded-card-sm bg-surface-2 border border-line p-5">
+                <div className="aspect-[16/9] w-full rounded-[10px] bg-black/80 border border-line-strong relative overflow-hidden flex flex-col items-center justify-center">
+                  {!recordingPlaying ? (
+                    <div className="flex flex-col items-center justify-center p-6 text-center">
+                      <button
+                        type="button"
+                        onClick={() => setRecordingPlaying(true)}
+                        className="size-16 rounded-full bg-accent text-bg grid place-items-center shadow-[0_0_24px_rgba(255,122,69,0.4)] hover:scale-105 transition-transform"
+                      >
+                        <Play className="size-7 ml-1 fill-current" />
+                      </button>
+                      <h5 className="mt-4 text-[16px] font-semibold text-fg">Session 1: Data Preparation & Foundation</h5>
+                      <p className="mt-1 text-[13px] text-muted">Click to play high-definition cohort replay</p>
+                    </div>
+                  ) : (
+                    <div className="size-full flex flex-col items-center justify-center p-8 bg-black text-center">
+                      <p className="text-[14px] text-accent font-medium animate-pulse">Playing Session 1 Recording...</p>
+                      <p className="text-[12px] text-muted mt-2">Full video streaming through Cloudflare Stream Player</p>
+                      <button
+                        type="button"
+                        onClick={() => setRecordingPlaying(false)}
+                        className="mt-4 rounded-[8px] bg-surface-2 border border-line px-3 py-1.5 text-[12px] text-fg hover:bg-white/10"
+                      >
+                        Pause Video
+                      </button>
+                    </div>
+                  )}
                 </div>
-                <span className="text-[12px] text-accent font-medium cursor-pointer hover:underline">
-                  Open
-                </span>
+
+                <div className="mt-4 flex items-center justify-between text-[12.5px] text-muted">
+                  <span>Topics: Dataset extraction, cleaning, API schema generation, vector embeddings.</span>
+                  <button
+                    type="button"
+                    onClick={handleDownloadWorksheet}
+                    className="inline-flex items-center gap-1.5 text-accent hover:underline font-medium"
+                  >
+                    <Download className="size-3.5" /> Notes & Timestamps
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* VIEW 3: SLACK COMMUNITY */}
+          {activeView === 'slack' && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="mt-6"
+            >
+              <div className="rounded-card-sm bg-surface-2 border border-line p-6 text-center">
+                <div className="size-14 rounded-full bg-accent-3/15 text-accent-3 grid place-items-center mx-auto mb-3">
+                  <Users className="size-7" />
+                </div>
+                <h4 className="text-[18px] font-semibold text-fg">Private Cohort 7 Slack Workspace</h4>
+                <p className="text-[13.5px] text-muted mt-1 max-w-md mx-auto">
+                  Collaborate directly with your cohort peers, share prompt evaluations, and get unblocked by engineers between sessions.
+                </p>
+
+                <div className="mt-5 max-w-sm mx-auto p-3.5 rounded-[10px] bg-black/40 border border-line text-left text-[12.5px]">
+                  <p className="text-muted">Channels included:</p>
+                  <ul className="mt-1 space-y-1 text-fg/90">
+                    <li>💬 <span className="font-mono text-accent">#cohort-7-general</span>: Daily discussions</li>
+                    <li>🛠️ <span className="font-mono text-accent">#cohort-7-projects</span>: Architecture reviews</li>
+                    <li>🚨 <span className="font-mono text-accent">#engineer-unblock</span>: Direct help desk</li>
+                  </ul>
+                </div>
+
+                <div className="mt-5 flex items-center justify-center gap-3">
+                  <a
+                    href="https://slack.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-[12px] bg-accent-3 px-5 py-2.5 text-[13.5px] font-semibold text-white hover:opacity-90 transition-opacity"
+                  >
+                    Open Cohort Slack <ExternalLink className="size-3.5" />
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => setActiveView('overview')}
+                    className="rounded-[12px] bg-surface border border-line px-4 py-2.5 text-[13px] text-muted hover:text-fg"
+                  >
+                    Back to Dashboard
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* VIEW 0: MAIN DASHBOARD OVERVIEW */}
+          {activeView === 'overview' && (
+            <>
+              {/* Active Cohort Progress Card */}
+              <div className="mt-6 rounded-card-sm bg-surface-2/70 p-5 border border-line relative overflow-hidden">
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute -right-10 -bottom-10 size-40 rounded-full bg-[radial-gradient(circle,rgb(255_122_69/0.15),transparent_70%)] blur-xl"
+                />
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <span className="inline-flex items-center gap-1.5 text-[12px] text-accent font-medium">
+                      <span className="round size-1.5 bg-accent" />
+                      Live Bootcamp Status
+                    </span>
+                    <h4 className="text-[17px] font-semibold text-fg mt-1">
+                      Week 2 of 6: Live Workflow Architecture & Evals
+                    </h4>
+                    <p className="text-[13px] text-muted mt-0.5 flex items-center gap-2">
+                      <Clock className="size-3.5 text-accent-2" /> Next live call: Thursday 7:00 PM IST (90 mins)
+                    </p>
+                  </div>
+
+                  {/* ACTIVE JOIN LIVE ROOM BUTTON */}
+                  <button
+                    type="button"
+                    onClick={() => setActiveView('live_room')}
+                    className="inline-flex items-center justify-center gap-2 rounded-[12px] bg-fg px-4 py-2.5 text-[13px] font-semibold text-bg hover:bg-white transition-all shadow-[0_4px_16px_rgba(255,255,255,0.2)] cursor-pointer hover:scale-[1.02]"
+                  >
+                    <Video className="size-4 text-accent fill-accent" /> Join Live Room
+                  </button>
+                </div>
+
+                {/* Step progress bar */}
+                <div className="mt-5 grid grid-cols-6 gap-2">
+                  {[
+                    { week: 'W1', title: 'Scope & Data', done: true },
+                    { week: 'W2', title: 'Architecture', active: true },
+                    { week: 'W3', title: 'Prompt & Chain', done: false },
+                    { week: 'W4', title: 'Guardrails', done: false },
+                    { week: 'W5', title: 'Evals & Tuning', done: false },
+                    { week: 'W6', title: 'Production Ship', done: false },
+                  ].map((step) => (
+                    <div key={step.week} className="flex flex-col gap-1.5">
+                      <div
+                        className={cx(
+                          'h-1.5 rounded-full',
+                          step.done
+                            ? 'bg-accent'
+                            : step.active
+                            ? 'bg-accent-2 animate-pulse'
+                            : 'bg-white/10'
+                        )}
+                      />
+                      <span className="text-[10.5px] text-muted truncate">
+                        {step.week}: {step.title}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
 
-              <div className="flex items-center justify-between p-3.5 rounded-[12px] bg-surface-2/40 border border-line hover:border-line-strong transition-colors">
-                <div className="flex items-center gap-3">
-                  <div className="size-8 rounded-[8px] bg-white/[0.08] grid place-items-center text-fg">
-                    <FileText className="size-4" />
+              {/* Enrolled Workflow Project Scope */}
+              {enrolment && (
+                <div className="mt-4 rounded-card-sm bg-surface-2/40 p-4 border border-line">
+                  <div className="flex items-center justify-between text-[12px] text-muted">
+                    <span>
+                      Official ID: <strong className="font-mono text-accent">{enrolment.id}</strong> · {enrolment.planLabel}
+                    </span>
+                    <span className="rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 text-[11px] font-medium capitalize">
+                      {enrolment.status}
+                    </span>
                   </div>
-                  <div>
-                    <p className="text-[13px] font-medium text-fg">Prompt Eval Worksheets</p>
-                    <p className="text-[11px] text-muted">Structured test suite & rubrics</p>
-                  </div>
+                  <h5 className="mt-2 text-[13.5px] font-semibold text-fg">Your Target Project:</h5>
+                  <p className="mt-0.5 text-[13px] text-muted leading-relaxed">{enrolment.workflowGoal}</p>
                 </div>
-                <span className="text-[12px] text-muted hover:text-fg font-medium cursor-pointer">
-                  <Download className="size-3.5" />
-                </span>
-              </div>
+              )}
 
-              <div className="flex items-center justify-between p-3.5 rounded-[12px] bg-surface-2/40 border border-line hover:border-line-strong transition-colors">
-                <div className="flex items-center gap-3">
-                  <div className="size-8 rounded-[8px] bg-accent-3/10 grid place-items-center text-accent-3">
-                    <Users className="size-4" />
+              {/* Quick Resources & Deliverables with ACTIVE INTERACTIVE ACTIONS */}
+              <div className="mt-6">
+                <h4 className="text-[14px] font-semibold uppercase tracking-wider text-muted mb-3">
+                  Cohort Deliverables & Materials
+                </h4>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  {/* Resource 1: Watch Session 1 Recording */}
+                  <div
+                    onClick={() => setActiveView('recording')}
+                    className="flex items-center justify-between p-3.5 rounded-[12px] bg-surface-2/40 border border-line hover:border-accent/40 hover:bg-surface-2/70 transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="size-8 rounded-[8px] bg-accent/10 grid place-items-center text-accent group-hover:scale-105 transition-transform">
+                        <Play className="size-4 fill-accent" />
+                      </div>
+                      <div>
+                        <p className="text-[13px] font-medium text-fg group-hover:text-accent transition-colors">Session 1 Recording</p>
+                        <p className="text-[11px] text-muted">90 mins · Data Preparation</p>
+                      </div>
+                    </div>
+                    <span className="text-[12px] text-accent font-medium group-hover:underline">
+                      Watch
+                    </span>
                   </div>
-                  <div>
-                    <p className="text-[13px] font-medium text-fg">Private Cohort Slack</p>
-                    <p className="text-[11px] text-muted">Direct instructor unblocking</p>
+
+                  {/* Resource 2: Project GitHub Repo */}
+                  <a
+                    href="https://github.com/anmolghost6789/LWE"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-between p-3.5 rounded-[12px] bg-surface-2/40 border border-line hover:border-accent-2/40 hover:bg-surface-2/70 transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="size-8 rounded-[8px] bg-accent-2/10 grid place-items-center text-accent-2 group-hover:scale-105 transition-transform">
+                        <Code2 className="size-4" />
+                      </div>
+                      <div>
+                        <p className="text-[13px] font-medium text-fg group-hover:text-accent-2 transition-colors">Project GitHub Repo</p>
+                        <p className="text-[11px] text-muted">Private repository scaffold</p>
+                      </div>
+                    </div>
+                    <span className="text-[12px] text-accent font-medium group-hover:underline inline-flex items-center gap-1">
+                      Open <ExternalLink className="size-3" />
+                    </span>
+                  </a>
+
+                  {/* Resource 3: Prompt Eval Worksheets */}
+                  <div
+                    onClick={handleDownloadWorksheet}
+                    className="flex items-center justify-between p-3.5 rounded-[12px] bg-surface-2/40 border border-line hover:border-line-strong hover:bg-surface-2/70 transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="size-8 rounded-[8px] bg-white/[0.08] grid place-items-center text-fg group-hover:scale-105 transition-transform">
+                        <FileText className="size-4" />
+                      </div>
+                      <div>
+                        <p className="text-[13px] font-medium text-fg group-hover:text-accent transition-colors">Prompt Eval Worksheets</p>
+                        <p className="text-[11px] text-muted">Structured test suite & rubrics</p>
+                      </div>
+                    </div>
+                    <span className="text-[12px] text-muted group-hover:text-fg font-medium inline-flex items-center gap-1">
+                      <Download className="size-3.5 text-accent" />
+                    </span>
+                  </div>
+
+                  {/* Resource 4: Private Cohort Slack */}
+                  <div
+                    onClick={() => setActiveView('slack')}
+                    className="flex items-center justify-between p-3.5 rounded-[12px] bg-surface-2/40 border border-line hover:border-accent-3/40 hover:bg-surface-2/70 transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="size-8 rounded-[8px] bg-accent-3/10 grid place-items-center text-accent-3 group-hover:scale-105 transition-transform">
+                        <Users className="size-4" />
+                      </div>
+                      <div>
+                        <p className="text-[13px] font-medium text-fg group-hover:text-accent-3 transition-colors">Private Cohort Slack</p>
+                        <p className="text-[11px] text-muted">Direct instructor unblocking</p>
+                      </div>
+                    </div>
+                    <span className="text-[12px] text-accent font-medium group-hover:underline">
+                      Connect
+                    </span>
                   </div>
                 </div>
-                <span className="text-[12px] text-accent font-medium cursor-pointer hover:underline">
-                  Connect
-                </span>
               </div>
-            </div>
-          </div>
+            </>
+          )}
 
           {/* Footer Actions */}
           <div className="mt-8 flex items-center justify-between border-t border-line pt-4">
