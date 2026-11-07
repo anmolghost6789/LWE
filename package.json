@@ -10,7 +10,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@auth0/auth0-react": "^2.30.0",
     "hono": "^4.13.0",
     "lucide-react": "^1.60.0",
     "motion": "^14.4.0",

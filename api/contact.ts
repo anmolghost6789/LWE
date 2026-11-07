@@ -7,6 +7,7 @@ interface ContactSubmission {
   name: string
   email: string
   phone: string
+  country?: string
   company: string
   service: string
   details: string
@@ -55,7 +56,7 @@ function saveSubmission(submission: ContactSubmission) {
 
 async function sendNotificationEmail(record: ContactSubmission) {
   const resendApiKey = process.env.RESEND_API_KEY
-  const teamEmail = process.env.TEAM_NOTIFICATION_EMAIL || 'anmolgupt0520@gmail.com'
+  const teamEmail = process.env.TEAM_NOTIFICATION_EMAIL || 'contact@learnwithexpert.com'
 
   console.log(`[CONTACT NOTIFICATION] Received from ${record.name} (${record.company}) for service: ${record.service}`)
 

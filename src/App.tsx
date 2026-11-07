@@ -1,5 +1,4 @@
 import { AuthProvider, useAuth } from './context/AuthContext'
-import { Auth0BridgeProvider } from './context/Auth0Bridge'
 import { AdminDashboard } from './components/AdminDashboard'
 import { AuthModal } from './components/AuthModal'
 import { JoinCohortModal } from './components/JoinCohortModal'
@@ -56,10 +55,8 @@ function AppContent() {
 
 export function App() {
   return (
-    <Auth0BridgeProvider>
-      <AuthProvider>
-        <AppContent />
-      </AuthProvider>
-    </Auth0BridgeProvider>
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   )
 }

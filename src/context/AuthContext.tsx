@@ -77,14 +77,6 @@ interface AuthContextType {
   login: (email: string, password: string, rememberMe?: boolean) => Promise<{ ok: boolean; error?: string; isAdmin?: boolean }>
   register: (name: string, email: string, password: string, phone?: string, company?: string) => Promise<{ ok: boolean; error?: string }>
   enrolStudent: (data: EnrolData) => Promise<{ ok: boolean; error?: string; enrolment?: Enrolment }>
-  signInWithGoogle: (details?: {
-    name?: string
-    email?: string
-    phone?: string
-    company?: string
-    plan?: 'bootcamp_full' | 'bootcamp_instalment' | 'recordings' | 'team'
-    workflowGoal?: string
-  }) => Promise<{ ok: boolean; error?: string; enrolment?: Enrolment; isAdmin?: boolean }>
   logout: () => Promise<void>
 }
 
@@ -289,46 +281,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const signInWithGoogle = async (details?: {
-    name?: string
-    email?: string
-    phone?: string
-    company?: string
-    plan?: 'bootcamp_full' | 'bootcamp_instalment' | 'recordings' | 'team'
-    workflowGoal?: string
-  }) => {
-    try {
-      const res = await fetch('/api/auth/google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(details || {}),
-      })
-      const data = (await res.json()) as ApiResponse
-
-      if (!res.ok || !data.ok || !data.user || !data.token) {
-        return { ok: false, error: data.error || 'Google sign in failed.' }
-      }
-
-      setUser(data.user)
-      setToken(data.token)
-      localStorage.setItem(TOKEN_KEY, data.token)
-      localStorage.setItem(USER_KEY, JSON.stringify(data.user))
-
-      if (data.enrolment) {
-        setEnrolment(data.enrolment)
-        localStorage.setItem(ENROLMENT_KEY, JSON.stringify(data.enrolment))
-      }
-
-      return {
-        ok: true,
-        enrolment: data.enrolment || undefined,
-        isAdmin: data.user.role === 'admin',
-      }
-    } catch {
-      return { ok: false, error: 'Connection error during Google authentication.' }
-    }
-  }
-
   const logout = async () => {
     try {
       if (token) {
@@ -375,7 +327,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         register,
         enrolStudent,
-        signInWithGoogle,
         logout,
       }}
     >

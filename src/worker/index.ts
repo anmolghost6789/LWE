@@ -39,6 +39,20 @@ export type Enrolment = {
   enrolledAt: string
 }
 
+type PlanKey = 'bootcamp_full' | 'bootcamp_instalment' | 'recordings' | 'team'
+
+// Server-side price list. Amounts are never taken from the request body.
+const PLAN_PRICES: Record<PlanKey, { label: string; amount: number }> = {
+  bootcamp_full: { label: 'Bootcamp (Pay in Full)', amount: 9999 },
+  bootcamp_instalment: { label: 'Bootcamp (3 Instalments)', amount: 3999 },
+  recordings: { label: 'Recordings Free Audit', amount: 0 },
+  team: { label: 'Team 5 Seats', amount: 39999 },
+}
+
+function isPlanKey(value: unknown): value is PlanKey {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(PLAN_PRICES, value)
+}
+
 // Persistent in-memory data store for real users and real enrolments
 const usersByEmail = new Map<string, AuthUser>()
 const sessions = new Map<string, { userId: string; expiresAt: number }>()
@@ -52,6 +66,40 @@ async function hashPassword(password: string): Promise<string> {
   return Array.from(new Uint8Array(hashBuffer))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
+}
+
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i += 1) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  }
+  return diff === 0
+}
+
+async function verifyPassword(password: string, passwordHash?: string): Promise<boolean> {
+  if (!passwordHash) return false
+  return safeEqual(await hashPassword(password), passwordHash)
+}
+
+// Resolves a real session from the Bearer token. Every authenticated route uses
+// this instead of trusting an email or user id sent by the client.
+function getSessionUser(c: any): AuthUser | null {
+  const authHeader = c.req.header('Authorization')
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null
+
+  const token = authHeader.slice('Bearer '.length).trim()
+  const session = sessions.get(token)
+  if (!session) return null
+  if (session.expiresAt < Date.now()) {
+    sessions.delete(token)
+    return null
+  }
+
+  for (const user of usersByEmail.values()) {
+    if (user.id === session.userId) return user
+  }
+  return null
 }
 
 // Seed the REAL Administrator account
@@ -108,7 +156,7 @@ app.post('/api/auth/register', async (c) => {
     const password = body.password ?? ''
     const studentRole = body.role?.trim() || 'Software Developer'
     const workflowGoal = body.workflowGoal?.trim() || 'Custom GenAI Workflow'
-    const plan = body.plan || 'bootcamp_full'
+    const plan = isPlanKey(body.plan) ? body.plan : 'bootcamp_full'
 
     if (!name || name.length < 2) {
       return c.json({ error: 'Please enter your full name (minimum 2 characters).' }, 400)
@@ -144,13 +192,7 @@ app.post('/api/auth/register', async (c) => {
     usersByEmail.set(email, newUser)
 
     // Automatically create real Enrolment record for Cohort 7
-    const planPrices: Record<string, { label: string; amount: number }> = {
-      bootcamp_full: { label: 'Bootcamp (Pay in Full)', amount: 9999 },
-      bootcamp_instalment: { label: 'Bootcamp (3 Instalments)', amount: 3999 },
-      recordings: { label: 'Recordings Free Audit', amount: 0 },
-      team: { label: 'Team 5 Seats', amount: 39999 },
-    }
-    const planDetails = planPrices[plan] || planPrices.bootcamp_full
+    const planDetails = PLAN_PRICES[plan]
 
     const newEnrolment: Enrolment = {
       id: `ENR-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`,
@@ -223,8 +265,7 @@ app.post('/api/auth/login', async (c) => {
       )
     }
 
-    const incomingHash = await hashPassword(password)
-    if (user.passwordHash !== incomingHash) {
+    if (!(await verifyPassword(password, user.passwordHash))) {
       return c.json({ error: 'Incorrect password. Please verify your credentials and try again.' }, 401)
     }
 
@@ -247,108 +288,6 @@ app.post('/api/auth/login', async (c) => {
   } catch (err) {
     console.error('Login error:', err)
     return c.json({ error: 'Failed to sign in. Please try again.' }, 500)
-  }
-})
-
-// ---------------------------------------------------------------------------
-// 2.5 Real Google Sign-In & Instant Google Enrolment
-// ---------------------------------------------------------------------------
-app.post('/api/auth/google', async (c) => {
-  try {
-    const body = await c.req.json<{
-      name?: string
-      email?: string
-      phone?: string
-      company?: string
-      plan?: 'bootcamp_full' | 'bootcamp_instalment' | 'recordings' | 'team'
-      workflowGoal?: string
-    }>().catch(() => ({} as {
-      name?: string
-      email?: string
-      phone?: string
-      company?: string
-      plan?: 'bootcamp_full' | 'bootcamp_instalment' | 'recordings' | 'team'
-      workflowGoal?: string
-    }))
-
-    const email = body.email?.trim().toLowerCase()
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email === 'google.student@gmail.com') {
-      return c.json(
-        { error: 'Authentication required. No verified Google credentials received. Please sign in or register.' },
-        401,
-      )
-    }
-
-    const name = body.name?.trim()
-    if (!name || name === 'Google User') {
-      return c.json(
-        { error: 'Authentication required. Verified profile name missing from provider.' },
-        401,
-      )
-    }
-
-    const phone = body.phone?.trim() || ''
-    const company = body.company?.trim() || ''
-    const plan = body.plan || 'bootcamp_full'
-    const workflowGoal = body.workflowGoal?.trim() || 'Custom GenAI Workflow'
-
-    let user = usersByEmail.get(email)
-    if (!user) {
-      user = {
-        id: `usr_google_${Date.now()}`,
-        name,
-        email,
-        phone,
-        company,
-        role: 'student',
-        cohort: 'Cohort 7 (Starts 17 Nov)',
-        createdAt: new Date().toISOString(),
-      }
-      usersByEmail.set(email, user)
-    }
-
-    let enrolment = enrolmentsList.find((e) => e.email === email)
-    if (!enrolment) {
-      const planPrices: Record<string, { label: string; amount: number }> = {
-        bootcamp_full: { label: 'Bootcamp (Pay in Full)', amount: 9999 },
-        bootcamp_instalment: { label: 'Bootcamp (3 Instalments)', amount: 3999 },
-        recordings: { label: 'Recordings Free Audit', amount: 0 },
-        team: { label: 'Team 5 Seats', amount: 39999 },
-      }
-      const planDetails = planPrices[plan] || planPrices.bootcamp_full
-
-      enrolment = {
-        id: `ENR-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`,
-        userId: user.id,
-        name,
-        email,
-        phone,
-        countryCode: '+91',
-        company,
-        cohort: 'Cohort 7 (Starts 17 Nov)',
-        plan,
-        planLabel: planDetails.label,
-        amount: planDetails.amount,
-        status: 'confirmed',
-        workflowGoal,
-        enrolledAt: new Date().toISOString(),
-      }
-      enrolmentsList.unshift(enrolment)
-    }
-
-    const token = `tok_${crypto.randomUUID()}`
-    sessions.set(token, { userId: user.id, expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000 })
-
-    const { passwordHash: _, ...safeUser } = user
-    return c.json({
-      ok: true,
-      message: 'Signed in with Google!',
-      user: safeUser,
-      enrolment,
-      token,
-    })
-  } catch {
-    return c.json({ error: 'Google sign in failed.' }, 500)
   }
 })
 
@@ -381,7 +320,7 @@ app.post('/api/enrol', async (c) => {
     const company = body.company?.trim() ?? ''
     const password = body.password ?? ''
     const workflowGoal = body.workflowGoal?.trim() || 'Production GenAI Workflow'
-    const plan = body.plan || 'bootcamp_full'
+    const plan = isPlanKey(body.plan) ? body.plan : 'bootcamp_full'
 
     if (!name || name.length < 2) {
       return c.json({ error: 'Please enter your full name.' }, 400)
@@ -393,11 +332,21 @@ app.post('/api/enrol', async (c) => {
       return c.json({ error: 'Please enter a valid phone number (minimum 7 digits).' }, 400)
     }
 
+    const requester = getSessionUser(c)
     let user = usersByEmail.get(email)
-    let token = ''
 
-    if (!user) {
-      // Create user if not registered yet
+    if (user) {
+      // Existing account: only its owner may enrol. Ownership is proven by the
+      // current session or by the account password, never by the submitted email.
+      const isOwner = requester?.id === user.id
+      if (!isOwner && !(await verifyPassword(password, user.passwordHash))) {
+        return c.json(
+          { error: 'An account with this email already exists. Sign in or enter the correct password to enrol.' },
+          401,
+        )
+      }
+    } else {
+      // New account: the supplied password becomes the account credential.
       if (!password || password.length < 8) {
         return c.json({ error: 'Please set a secure password (minimum 8 characters) for your learning portal.' }, 400)
       }
@@ -417,16 +366,10 @@ app.post('/api/enrol', async (c) => {
       usersByEmail.set(email, user)
     }
 
-    token = `tok_${crypto.randomUUID()}`
+    const token = `tok_${crypto.randomUUID()}`
     sessions.set(token, { userId: user.id, expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000 })
 
-    const planPrices: Record<string, { label: string; amount: number }> = {
-      bootcamp_full: { label: 'Bootcamp (Pay in Full)', amount: 9999 },
-      bootcamp_instalment: { label: 'Bootcamp (3 Instalments)', amount: 3999 },
-      recordings: { label: 'Recordings Free Audit', amount: 0 },
-      team: { label: 'Team 5 Seats', amount: 39999 },
-    }
-    const planDetails = planPrices[plan] || planPrices.bootcamp_full
+    const planDetails = PLAN_PRICES[plan]
 
     const enrolmentRecord: Enrolment = {
       id: `ENR-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`,
@@ -464,29 +407,15 @@ app.post('/api/enrol', async (c) => {
 // ---------------------------------------------------------------------------
 // 4. Session Validation
 // ---------------------------------------------------------------------------
-app.get('/api/auth/me', async (c) => {
-  const authHeader = c.req.header('Authorization')
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return c.json({ ok: false, user: null }, 401)
+app.get('/api/auth/me', (c) => {
+  const user = getSessionUser(c)
+  if (!user) {
+    return c.json({ ok: false, user: null, error: 'Session expired. Please sign in again.' }, 401)
   }
 
-  const token = authHeader.replace('Bearer ', '').trim()
-  const session = sessions.get(token)
-
-  if (!session || session.expiresAt < Date.now()) {
-    sessions.delete(token)
-    return c.json({ ok: false, error: 'Session expired. Please sign in again.' }, 401)
-  }
-
-  for (const user of usersByEmail.values()) {
-    if (user.id === session.userId) {
-      const userEnrolment = enrolmentsList.find((e) => e.userId === user.id || e.email === user.email)
-      const { passwordHash: _, ...safeUser } = user
-      return c.json({ ok: true, user: safeUser, enrolment: userEnrolment || null })
-    }
-  }
-
-  return c.json({ ok: false, error: 'User not found.' }, 404)
+  const userEnrolment = enrolmentsList.find((e) => e.userId === user.id || e.email === user.email)
+  const { passwordHash: _, ...safeUser } = user
+  return c.json({ ok: true, user: safeUser, enrolment: userEnrolment || null })
 })
 
 // ---------------------------------------------------------------------------
@@ -505,19 +434,8 @@ app.post('/api/auth/logout', async (c) => {
 // 6. Admin Portal APIs (Real-time student roster, metrics, and actions)
 // ---------------------------------------------------------------------------
 function getAuthenticatedAdmin(c: any): AuthUser | null {
-  const authHeader = c.req.header('Authorization')
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return null
-
-  const token = authHeader.replace('Bearer ', '').trim()
-  const session = sessions.get(token)
-  if (!session || session.expiresAt < Date.now()) return null
-
-  for (const user of usersByEmail.values()) {
-    if (user.id === session.userId && user.role === 'admin') {
-      return user
-    }
-  }
-  return null
+  const user = getSessionUser(c)
+  return user?.role === 'admin' ? user : null
 }
 
 // Get all real enrolments & stats
@@ -585,6 +503,9 @@ app.delete('/api/admin/enrolments/:id', (c) => {
   enrolmentsList.splice(index, 1)
   return c.json({ ok: true, message: 'Enrolment removed.' })
 })
+
+// Unknown API paths must never be answered by the static asset fallback.
+app.all('/api/*', (c) => c.json({ error: 'Not found.' }, 404))
 
 // Fallback to static assets
 app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw))
