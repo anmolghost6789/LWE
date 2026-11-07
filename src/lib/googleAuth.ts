@@ -12,7 +12,8 @@ export const GOOGLE_CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID || '')
 export function isGoogleOAuthConfigured(): boolean {
   return Boolean(
     GOOGLE_CLIENT_ID &&
-    !GOOGLE_CLIENT_ID.includes('your-google-client-id') &&
+    !GOOGLE_CLIENT_ID.includes('your-') &&
+    !GOOGLE_CLIENT_ID.includes('placeholder') &&
     GOOGLE_CLIENT_ID.endsWith('.apps.googleusercontent.com')
   )
 }
