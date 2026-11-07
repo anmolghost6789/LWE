@@ -198,9 +198,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, rememberMe }),
       })
-      let data: ApiResponse
+      const text = await res.text()
+      let data: ApiResponse = {}
       try {
-        data = (await res.json()) as ApiResponse
+        data = JSON.parse(text) as ApiResponse
       } catch {
         return { ok: false, error: `Server returned an invalid response (${res.status}).` }
       }
@@ -237,9 +238,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email, password, phone, company, plan: 'bootcamp_full' }),
       })
-      let data: ApiResponse
+      const text = await res.text()
+      let data: ApiResponse = {}
       try {
-        data = (await res.json()) as ApiResponse
+        data = JSON.parse(text) as ApiResponse
       } catch {
         return { ok: false, error: `Server returned an invalid response (${res.status}).` }
       }
@@ -271,9 +273,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       })
-      let resData: ApiResponse
+      const text = await res.text()
+      let resData: ApiResponse = {}
       try {
-        resData = (await res.json()) as ApiResponse
+        resData = JSON.parse(text) as ApiResponse
       } catch {
         return { ok: false, error: `Server returned an invalid response (${res.status}).` }
       }

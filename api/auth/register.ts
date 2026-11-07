@@ -4,13 +4,14 @@ import {
   saveUser,
   saveEnrolment,
   saveSession,
+  generateToken,
   isPlanKey,
   PLAN_PRICES,
   parseRequestBody,
   sendResponse,
   type AuthUser,
   type Enrolment,
-} from '../_store.ts'
+} from '../_store'
 
 export default async function handler(req: any, res?: any) {
   if (req.method === 'OPTIONS') {
@@ -56,7 +57,7 @@ export default async function handler(req: any, res?: any) {
       return sendResponse(res, 409, { error: 'An account with this email already exists. Please sign in.' })
     }
 
-    const passwordHash = await hashPassword(password)
+    const passwordHash = hashPassword(password)
     const newUser: AuthUser = {
       id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       name,
@@ -91,7 +92,7 @@ export default async function handler(req: any, res?: any) {
 
     saveEnrolment(newEnrolment)
 
-    const token = `tok_${crypto.randomUUID()}`
+    const token = generateToken()
     const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000 // 30 days
     saveSession(token, { userId: newUser.id, expiresAt })
 
@@ -103,8 +104,8 @@ export default async function handler(req: any, res?: any) {
       enrolment: newEnrolment,
       token,
     })
-  } catch (err) {
+  } catch (err: any) {
     console.error('Registration error:', err)
-    return sendResponse(res, 500, { error: 'Failed to complete registration. Please try again.' })
+    return sendResponse(res, 500, { error: err?.message || 'Failed to complete registration. Please try again.' })
   }
 }

@@ -5,14 +5,14 @@ import {
   saveUser,
   saveEnrolment,
   saveSession,
+  generateToken,
   getSessionUserFromReq,
   isPlanKey,
   PLAN_PRICES,
   parseRequestBody,
   sendResponse,
-  type AuthUser,
   type Enrolment,
-} from './_store.ts'
+} from './_store'
 
 export default async function handler(req: any, res?: any) {
   if (req.method === 'OPTIONS') {
@@ -57,7 +57,7 @@ export default async function handler(req: any, res?: any) {
 
     if (user) {
       const isOwner = requester?.id === user.id
-      if (!isOwner && !(await verifyPassword(password, user.passwordHash))) {
+      if (!isOwner && !verifyPassword(password, user.passwordHash)) {
         return sendResponse(res, 401, {
           error: 'An account with this email already exists. Sign in or enter the correct password to enrol.',
         })
@@ -69,7 +69,7 @@ export default async function handler(req: any, res?: any) {
         })
       }
 
-      const passwordHash = await hashPassword(password)
+      const passwordHash = hashPassword(password)
       user = {
         id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         name,
@@ -84,7 +84,7 @@ export default async function handler(req: any, res?: any) {
       saveUser(user)
     }
 
-    const token = `tok_${crypto.randomUUID()}`
+    const token = generateToken()
     saveSession(token, { userId: user.id, expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000 })
 
     const planDetails = PLAN_PRICES[plan]

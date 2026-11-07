@@ -4,7 +4,7 @@ import {
   deleteEnrolment,
   parseRequestBody,
   sendResponse,
-} from '../../_store.ts'
+} from '../../_store'
 
 function extractId(req: any): string {
   if (req?.query?.id) {

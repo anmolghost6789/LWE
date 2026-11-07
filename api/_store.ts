@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 
 export type AuthUser = {
   id: string
@@ -59,15 +60,19 @@ const ADMIN_USER: AuthUser = {
 }
 
 // ---------------------------------------------------------------------------
-// Password hashing
+// Password hashing & Tokens
 // ---------------------------------------------------------------------------
-export async function hashPassword(password: string): Promise<string> {
+export function hashPassword(password: string): string {
   const encoder = new TextEncoder()
   const data = encoder.encode(password + '_lwe_secure_salt_2026')
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
+  return crypto.createHash('sha256').update(data).digest('hex')
+}
+
+export function generateToken(): string {
+  if (typeof crypto.randomUUID === 'function') {
+    return `tok_${crypto.randomUUID()}`
+  }
+  return `tok_${crypto.randomBytes(24).toString('hex')}`
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -79,9 +84,9 @@ function safeEqual(a: string, b: string): boolean {
   return diff === 0
 }
 
-export async function verifyPassword(password: string, passwordHash?: string): Promise<boolean> {
+export function verifyPassword(password: string, passwordHash?: string): boolean {
   if (!passwordHash) return false
-  return safeEqual(await hashPassword(password), passwordHash)
+  return safeEqual(hashPassword(password), passwordHash)
 }
 
 // ---------------------------------------------------------------------------
@@ -250,15 +255,8 @@ export function getSessionUserFromReq(req: any): AuthUser | null {
 // HTTP Request & Response Helpers
 // ---------------------------------------------------------------------------
 export async function parseRequestBody<T = any>(req: any): Promise<T> {
-  if (req && typeof req.json === 'function') {
-    try {
-      return (await req.json()) as T
-    } catch {
-      return {} as T
-    }
-  }
-
-  if (req && req.body) {
+  // If Vercel Node.js Serverless already parsed req.body
+  if (req && req.body !== undefined && req.body !== null) {
     if (typeof req.body === 'string') {
       try {
         return JSON.parse(req.body) as T
@@ -269,6 +267,21 @@ export async function parseRequestBody<T = any>(req: any): Promise<T> {
     return req.body as T
   }
 
+  // If Web API Request (req.json)
+  if (req && typeof req.json === 'function') {
+    try {
+      return (await req.json()) as T
+    } catch {
+      return {} as T
+    }
+  }
+
+  // If already ended stream or empty
+  if (req && (req.readableEnded || req.complete)) {
+    return (req.body || {}) as T
+  }
+
+  // Node.js stream fallback
   if (req && typeof req.on === 'function') {
     return new Promise((resolve) => {
       let body = ''
@@ -295,6 +308,9 @@ export function sendResponse(res: any, status: number, data: any): Response | vo
   // Standard Next/Vercel Serverless (res.status().json())
   if (res && typeof res.status === 'function' && typeof res.json === 'function') {
     res.setHeader('Content-Type', 'application/json')
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
     res.status(status).json(data)
     return
   }

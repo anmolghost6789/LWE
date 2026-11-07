@@ -2,10 +2,11 @@ import {
   getUserByEmail,
   verifyPassword,
   saveSession,
+  generateToken,
   getEnrolments,
   parseRequestBody,
   sendResponse,
-} from '../_store.ts'
+} from '../_store'
 
 export default async function handler(req: any, res?: any) {
   if (req.method === 'OPTIONS') {
@@ -40,13 +41,13 @@ export default async function handler(req: any, res?: any) {
       })
     }
 
-    if (!(await verifyPassword(password, user.passwordHash))) {
+    if (!verifyPassword(password, user.passwordHash)) {
       return sendResponse(res, 401, {
         error: 'Incorrect password. Please verify your credentials and try again.',
       })
     }
 
-    const token = `tok_${crypto.randomUUID()}`
+    const token = generateToken()
     const duration = body.rememberMe ? 60 * 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000
     saveSession(token, { userId: user.id, expiresAt: Date.now() + duration })
 
@@ -61,8 +62,8 @@ export default async function handler(req: any, res?: any) {
       enrolment: userEnrolment || null,
       token,
     })
-  } catch (err) {
+  } catch (err: any) {
     console.error('Login error:', err)
-    return sendResponse(res, 500, { error: 'Failed to sign in. Please try again.' })
+    return sendResponse(res, 500, { error: err?.message || 'Failed to sign in. Please try again.' })
   }
 }

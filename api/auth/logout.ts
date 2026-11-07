@@ -1,7 +1,7 @@
 import {
   deleteSession,
   sendResponse,
-} from '../_store.ts'
+} from '../_store'
 
 export default async function handler(req: any, res?: any) {
   if (req.method === 'OPTIONS') {
