@@ -350,14 +350,19 @@ app.post('/api/auth/google', async (c) => {
       }
     }
 
-    // Local development fallback
-    if (!verifiedEmail && body.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) {
+    // Fallback if Google OAuth Client ID is not configured yet
+    const isGoogleConfigured = Boolean((c.env as any)?.GOOGLE_CLIENT_ID || (c.env as any)?.VITE_GOOGLE_CLIENT_ID)
+    if (!verifiedEmail && !isGoogleConfigured && body.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) {
       verifiedEmail = body.email.toLowerCase().trim()
-      verifiedName = body.name || 'Google Student'
+      verifiedName = body.name || body.email.split('@')[0] || 'Google Student'
     }
 
     if (!verifiedEmail) {
-      return c.json({ error: 'Google authentication failed. Unable to verify credentials with Google.' }, 401)
+      return c.json({
+        error: isGoogleConfigured
+          ? 'Google authentication failed. Unable to verify credentials with Google.'
+          : 'Google OAuth is not configured yet. Please add VITE_GOOGLE_CLIENT_ID to your environment variables.',
+      }, 401)
     }
 
     let user = usersByEmail.get(verifiedEmail)

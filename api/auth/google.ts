@@ -246,18 +246,21 @@ export default async function handler(req: any, res?: any) {
 
     let profile: GoogleProfile | null = await verifyGoogleToken(credential, accessToken)
 
-    // Fallback in local development if simulated profile was provided
-    if (!profile && process.env.NODE_ENV !== 'production' && body.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) {
+    // If Google OAuth Client ID is not configured in environment yet, allow preview/testing with valid email format
+    const isGoogleConfigured = Boolean(process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID)
+    if (!profile && !isGoogleConfigured && body.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) {
       profile = {
         email: body.email.toLowerCase().trim(),
-        name: body.name || 'Google Student',
-        sub: `dev_google_${Date.now()}`,
+        name: body.name || body.email.split('@')[0] || 'Google Student',
+        sub: `google_sim_${Date.now()}`,
       }
     }
 
     if (!profile || !profile.email) {
       return sendJson(res, 401, {
-        error: 'Google authorization failed. Unable to verify credentials with Google.',
+        error: isGoogleConfigured
+          ? 'Google authorization failed. Unable to verify credentials with Google.'
+          : 'Google OAuth is not configured yet. Please add VITE_GOOGLE_CLIENT_ID and GOOGLE_CLIENT_ID to your environment variables.',
       })
     }
 
@@ -356,3 +359,4 @@ export default async function handler(req: any, res?: any) {
     return sendJson(res, 500, { error: err?.message || 'Server error during Google authentication.' })
   }
 }
+
