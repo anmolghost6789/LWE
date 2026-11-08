@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import {
+  AlertCircle,
   ArrowLeft,
   Calendar,
   Check,
@@ -11,10 +12,12 @@ import {
   ExternalLink,
   FileText,
   GitBranch,
+  Lock,
   LogOut,
   Mic,
   Play,
   Radio,
+  RefreshCw,
   Save,
   Sparkles,
   Terminal,
@@ -29,13 +32,23 @@ import { cx } from '../lib/cx'
 type ActiveView = 'overview' | 'live_room' | 'recording' | 'slack' | 'repo'
 
 export function StudentDashboardModal() {
-  const { user, enrolment, isDashboardOpen, closeDashboard, logout } = useAuth()
+  const { user, enrolment, isDashboardOpen, closeDashboard, logout, resubmitUtr, refreshEnrolment } = useAuth()
   const [activeView, setActiveView] = useState<ActiveView>('overview')
   const [isCopied, setIsCopied] = useState(false)
   const [cloneCopied, setCloneCopied] = useState(false)
   const [micActive, setMicActive] = useState(true)
   const [cameraActive, setCameraActive] = useState(true)
   const [recordingPlaying, setRecordingPlaying] = useState(false)
+  const [resubmitUtrInput, setResubmitUtrInput] = useState('')
+  const [isResubmitting, setIsResubmitting] = useState(false)
+  const [resubmitMsg, setResubmitMsg] = useState('')
+  const [resubmitErr, setResubmitErr] = useState('')
+  const [isRefreshing, setIsRefreshing] = useState(false)
+
+  const isEnrolmentApproved = enrolment?.status === 'approved' || enrolment?.status === 'confirmed'
+  const isEnrolmentPending = enrolment?.status === 'pending'
+  const isEnrolmentRejected = enrolment?.status === 'rejected'
+
   const [studentRepoUrl, setStudentRepoUrl] = useState(() => {
     try {
       return localStorage.getItem('lwe_student_repo_' + (user?.id || '')) || ''
@@ -253,23 +266,44 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
 
                 {/* Primary Launch Buttons */}
                 <div className="mt-5 grid sm:grid-cols-3 gap-2.5">
-                  <a
-                    href={liveMeetingUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="sm:col-span-2 inline-flex items-center justify-center gap-2 rounded-[12px] bg-accent px-5 py-3 text-[14px] font-semibold text-bg hover:bg-accent-2 transition-all shadow-[0_4px_20px_rgba(255_122_69,0.35)]"
-                  >
-                    <Video className="size-4.5" /> Launch Live Room in Google Meet <ExternalLink className="size-3.5 opacity-70" />
-                  </a>
+                  {isEnrolmentApproved ? (
+                    <a
+                      href={liveMeetingUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="sm:col-span-2 inline-flex items-center justify-center gap-2 rounded-[12px] bg-accent px-5 py-3 text-[14px] font-semibold text-bg hover:bg-accent-2 transition-all shadow-[0_4px_20px_rgba(255_122_69,0.35)]"
+                    >
+                      <Video className="size-4.5" /> Launch Live Room in Google Meet <ExternalLink className="size-3.5 opacity-70" />
+                    </a>
+                  ) : (
+                    <div className="sm:col-span-2 inline-flex items-center justify-center gap-2 rounded-[12px] bg-amber-500/15 border border-amber-500/30 px-5 py-3 text-[13.5px] font-semibold text-amber-400">
+                      <Lock className="size-4.5" /> Live Room Locked · Awaiting Admin Verification
+                    </div>
+                  )}
 
-                  <button
-                    type="button"
-                    onClick={handleCopyLink}
-                    className="inline-flex items-center justify-center gap-2 rounded-[12px] bg-surface border border-line px-4 py-3 text-[13px] font-medium text-fg hover:bg-white/[0.08] transition-colors"
-                  >
-                    {isCopied ? <Check className="size-4 text-emerald-400" /> : <Copy className="size-4 text-muted" />}
-                    {isCopied ? 'Link Copied!' : 'Copy Meeting Link'}
-                  </button>
+                  {isEnrolmentApproved ? (
+                    <button
+                      type="button"
+                      onClick={handleCopyLink}
+                      className="inline-flex items-center justify-center gap-2 rounded-[12px] bg-surface border border-line px-4 py-3 text-[13px] font-medium text-fg hover:bg-white/[0.08] transition-colors"
+                    >
+                      {isCopied ? <Check className="size-4 text-emerald-400" /> : <Copy className="size-4 text-muted" />}
+                      {isCopied ? 'Link Copied!' : 'Copy Meeting Link'}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setIsRefreshing(true)
+                        await refreshEnrolment()
+                        setTimeout(() => setIsRefreshing(false), 800)
+                      }}
+                      className="inline-flex items-center justify-center gap-2 rounded-[12px] bg-surface border border-line px-4 py-3 text-[13px] font-medium text-fg hover:bg-white/[0.08] transition-colors"
+                    >
+                      <RefreshCw className={cx('size-4 text-muted', isRefreshing && 'animate-spin')} />
+                      Refresh Status
+                    </button>
+                  )}
                 </div>
 
                 <div className="mt-3 flex items-center justify-between text-[12px] text-muted pt-2 border-t border-line/60">
@@ -505,8 +539,15 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
                     <span className="inline-flex items-center gap-1.5 text-[12px] text-accent font-medium">
-                      <span className="size-2 rounded-full bg-emerald-400 animate-pulse" />
-                      Live Bootcamp Status · {user.cohort || 'Cohort 7 (Starts 17 Nov)'}
+                      <span className={cx(
+                        'size-2 rounded-full',
+                        isEnrolmentApproved ? 'bg-emerald-400 animate-pulse' :
+                        isEnrolmentPending ? 'bg-amber-400 animate-pulse' :
+                        'bg-red-400'
+                      )} />
+                      {isEnrolmentApproved ? `Live Bootcamp Status · ${user.cohort || 'Cohort 7 (Starts 17 Nov)'}` :
+                       isEnrolmentPending ? `Payment Verification Pending · ${user.cohort || 'Cohort 7'}` :
+                       'Payment Verification Rejected · Action Required'}
                     </span>
                     <h4 className="text-[17px] font-semibold text-fg mt-1">
                       Week 1 of 6: Scope, Live Architecture & Kickoff
@@ -522,22 +563,38 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
                     </p>
                   </div>
 
-                  {/* ACTIVE JOIN LIVE ROOM BUTTON GROUP */}
+                  {/* ACTIVE JOIN LIVE ROOM BUTTON GROUP - GATED BY APPROVAL */}
                   <div className="flex items-center gap-2 shrink-0">
-                    <a
-                      href={liveMeetingUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center justify-center gap-2 rounded-[12px] bg-fg px-4 py-2.5 text-[13px] font-semibold text-bg hover:bg-white transition-all shadow-[0_4px_16px_rgba(255,255,255,0.2)] cursor-pointer hover:scale-[1.02]"
-                    >
-                      <Video className="size-4 text-accent fill-accent" /> Join Live Room
-                      <ExternalLink className="size-3.5 opacity-60 text-bg" />
-                    </a>
+                    {isEnrolmentApproved ? (
+                      <a
+                        href={liveMeetingUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center gap-2 rounded-[12px] bg-fg px-4 py-2.5 text-[13px] font-semibold text-bg hover:bg-white transition-all shadow-[0_4px_16px_rgba(255,255,255,0.2)] cursor-pointer hover:scale-[1.02]"
+                      >
+                        <Video className="size-4 text-accent fill-accent" /> Join Live Room
+                        <ExternalLink className="size-3.5 opacity-60 text-bg" />
+                      </a>
+                    ) : isEnrolmentPending ? (
+                      <div
+                        className="inline-flex items-center justify-center gap-1.5 rounded-[12px] bg-amber-500/15 border border-amber-500/30 px-3.5 py-2.5 text-[12.5px] font-semibold text-amber-300"
+                        title="Your payment details are being verified by the admissions team"
+                      >
+                        <Lock className="size-3.5 text-amber-400" /> Room Locked (Pending Verification)
+                      </div>
+                    ) : (
+                      <div
+                        className="inline-flex items-center justify-center gap-1.5 rounded-[12px] bg-red-500/15 border border-red-500/30 px-3.5 py-2.5 text-[12.5px] font-semibold text-red-300"
+                        title="Payment verification rejected. Please resubmit valid UTR below."
+                      >
+                        <Lock className="size-3.5 text-red-400" /> Room Locked (Payment Rejected)
+                      </div>
+                    )}
 
                     <button
                       type="button"
                       onClick={() => setActiveView('live_room')}
-                      className="inline-flex items-center justify-center gap-1.5 rounded-[12px] bg-white/[0.06] hover:bg-white/[0.12] border border-line px-3 py-2.5 text-[12px] font-medium text-fg transition-all"
+                      className="inline-flex items-center justify-center gap-1.5 rounded-[12px] bg-white/[0.06] hover:bg-white/[0.12] border border-line px-3 py-2.5 text-[12px] font-medium text-fg transition-all cursor-pointer"
                       title="Classroom Details, Mic/Cam Test & Calendar"
                     >
                       <Calendar className="size-3.5 text-accent" />
@@ -573,6 +630,95 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
                     </div>
                   ))}
                 </div>
+
+                {/* PENDING VERIFICATION NOTICE BANNER */}
+                {isEnrolmentPending && (
+                  <div className="mt-4 rounded-[12px] bg-amber-500/10 border border-amber-500/25 p-3.5 text-[12.5px] flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-2.5">
+                      <Clock className="size-4 text-amber-400 shrink-0 mt-0.5 animate-pulse" />
+                      <div>
+                        <p className="font-semibold text-amber-200">Payment verification in progress</p>
+                        <p className="text-amber-300/80 mt-0.5 leading-relaxed">
+                          Submitted UTR / Transaction ID:{' '}
+                          <code className="font-mono bg-black/40 px-1.5 py-0.5 rounded text-amber-100 font-semibold">
+                            {enrolment?.utrNumber || 'Submitted for verification'}
+                          </code>
+                          . Our admissions admin is verifying your payment with bank records. Your Google Meet live room link and session materials will unlock immediately upon approval.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setIsRefreshing(true)
+                        await refreshEnrolment()
+                        setTimeout(() => setIsRefreshing(false), 800)
+                      }}
+                      className="shrink-0 inline-flex items-center gap-1.5 rounded-[8px] bg-white/10 hover:bg-white/20 px-2.5 py-1.5 text-[11.5px] font-medium text-fg transition-colors cursor-pointer"
+                      title="Check verification status"
+                    >
+                      <RefreshCw className={cx('size-3.5', isRefreshing && 'animate-spin')} />
+                      Check Status
+                    </button>
+                  </div>
+                )}
+
+                {/* REJECTED PAYMENT NOTICE & RESUBMIT FORM */}
+                {isEnrolmentRejected && (
+                  <div className="mt-4 rounded-[12px] bg-red-500/10 border border-red-500/30 p-4 text-[13px]">
+                    <div className="flex items-start gap-2.5">
+                      <AlertCircle className="size-4.5 text-red-400 shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="font-semibold text-red-300">Payment Verification Was Not Approved</p>
+                        <p className="text-red-200/90 mt-1 leading-relaxed">
+                          <strong>Admin Reason:</strong> {enrolment?.rejectionReason || 'The submitted UTR number could not be matched with bank statement records.'}
+                        </p>
+                        <p className="text-muted text-[12px] mt-2">
+                          Please check your UPI app receipt (Google Pay, PhonePe, Paytm, or Bank Statement), enter your correct 12-digit UTR/Ref ID below, and click Resubmit:
+                        </p>
+
+                        <form
+                          onSubmit={async (e) => {
+                            e.preventDefault()
+                            if (!resubmitUtrInput.trim() || resubmitUtrInput.trim().length < 6) {
+                              setResubmitErr('Please enter a valid 12-digit UTR number.')
+                              return
+                            }
+                            setResubmitErr('')
+                            setResubmitMsg('')
+                            setIsResubmitting(true)
+                            const res = await resubmitUtr(resubmitUtrInput.trim(), enrolment?.id)
+                            setIsResubmitting(false)
+                            if (res.ok) {
+                              setResubmitMsg('✓ Payment details resubmitted successfully! Your status is now Pending.')
+                              setResubmitUtrInput('')
+                            } else {
+                              setResubmitErr(res.error || 'Failed to resubmit UTR.')
+                            }
+                          }}
+                          className="mt-3 flex flex-col sm:flex-row gap-2"
+                        >
+                          <input
+                            type="text"
+                            placeholder="Enter correct 12-digit UTR Number"
+                            value={resubmitUtrInput}
+                            onChange={(e) => setResubmitUtrInput(e.target.value)}
+                            className="depth flex-1 rounded-[10px] bg-black/60 px-3 py-2 text-[13px] font-mono text-fg placeholder:text-muted/50 focus:outline-none focus:ring-1 focus:ring-accent"
+                          />
+                          <button
+                            type="submit"
+                            disabled={isResubmitting || !resubmitUtrInput.trim()}
+                            className="rounded-[10px] bg-accent px-4 py-2 text-[13px] font-semibold text-bg hover:bg-accent-2 transition-all disabled:opacity-50 cursor-pointer"
+                          >
+                            {isResubmitting ? 'Submitting...' : 'Resubmit UTR for Verification'}
+                          </button>
+                        </form>
+                        {resubmitErr && <p className="mt-1.5 text-[11.5px] text-red-400">{resubmitErr}</p>}
+                        {resubmitMsg && <p className="mt-1.5 text-[11.5px] text-emerald-400">{resubmitMsg}</p>}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Enrolled Workflow Project Scope */}
@@ -582,10 +728,21 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
                     <span>
                       Official ID: <strong className="font-mono text-accent">{enrolment.id}</strong> · {enrolment.planLabel}
                     </span>
-                    <span className="rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 text-[11px] font-medium capitalize">
-                      {enrolment.status}
+                    <span className={cx(
+                      'rounded-full px-2.5 py-0.5 text-[11px] font-medium capitalize border',
+                      isEnrolmentApproved ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' :
+                      isEnrolmentPending ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' :
+                      'bg-red-500/15 text-red-400 border-red-500/30'
+                    )}>
+                      {isEnrolmentApproved ? '✓ Verified & Active' : isEnrolmentPending ? '⏳ Awaiting Verification' : '⚠️ Payment Rejected'}
                     </span>
                   </div>
+                  {enrolment.utrNumber && (
+                    <div className="mt-2 text-[12px] text-muted flex items-center gap-2">
+                      <span>Submitted UTR / Transaction ID:</span>
+                      <code className="font-mono bg-black/40 text-fg px-1.5 py-0.5 rounded text-[11.5px]">{enrolment.utrNumber}</code>
+                    </div>
+                  )}
                   <h5 className="mt-2 text-[13.5px] font-semibold text-fg">Your Target Project:</h5>
                   <p className="mt-0.5 text-[13px] text-muted leading-relaxed">{enrolment.workflowGoal}</p>
                 </div>

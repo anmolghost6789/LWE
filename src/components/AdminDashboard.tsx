@@ -2,6 +2,11 @@ import { AnimatePresence, motion } from 'motion/react'
 import {
   AlertCircle,
   ArrowRight,
+  Ban,
+  Check,
+  CheckCircle2,
+  Clock,
+  Copy,
   Download,
   Filter,
   Lock,
@@ -14,7 +19,6 @@ import {
   Trash2,
   TrendingUp,
   User,
-  UserCheck,
   Users,
   X,
 } from 'lucide-react'
@@ -35,14 +39,22 @@ interface AdminEnrolment {
   plan: 'bootcamp_full' | 'bootcamp_instalment' | 'recordings' | 'team'
   planLabel: string
   amount: number
-  status: 'confirmed' | 'pending' | 'waitlist'
+  status: 'confirmed' | 'approved' | 'pending' | 'rejected' | 'waitlist'
   workflowGoal: string
   enrolledAt: string
+  utrNumber?: string
+  paymentMethod?: string
+  rejectionReason?: string
+  verifiedAt?: string
+  verifiedBy?: string
 }
 
 interface AdminStats {
-  totalEnrolled: number
-  confirmedCount: number
+  totalEnrolments?: number
+  confirmedCount?: number
+  approvedCount?: number
+  pendingCount?: number
+  rejectedCount?: number
   seatsRemaining: number
   maxCohortSeats: number
   totalRevenue: number
@@ -60,15 +72,22 @@ export function AdminDashboard() {
   // Admin data states
   const [enrolments, setEnrolments] = useState<AdminEnrolment[]>([])
   const [stats, setStats] = useState<AdminStats>({
-    totalEnrolled: 0,
     confirmedCount: 0,
+    approvedCount: 0,
+    pendingCount: 0,
+    rejectedCount: 0,
     seatsRemaining: 6,
     maxCohortSeats: 6,
     totalRevenue: 0,
   })
   const [isLoading, setIsLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'confirmed' | 'pending'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all')
+  const [copiedUtrId, setCopiedUtrId] = useState<string | null>(null)
+
+  // Rejection modal state
+  const [rejectingStudent, setRejectingStudent] = useState<AdminEnrolment | null>(null)
+  const [rejectionReason, setRejectionReason] = useState('UTR number not found in bank statement.')
 
   const isAdmin = user?.role === 'admin'
 
@@ -80,7 +99,7 @@ export function AdminDashboard() {
         headers: { Authorization: `Bearer ${token}` },
       })
       const data = (await res.json()) as { ok: boolean; enrolments?: AdminEnrolment[]; stats?: AdminStats }
-      if (data.ok && data.enrolments && data.stats) {
+      if (data.enrolments && data.stats) {
         setEnrolments(data.enrolments)
         setStats(data.stats)
       }
@@ -114,7 +133,11 @@ export function AdminDashboard() {
     }
   }
 
-  const updateStatus = async (id: string, newStatus: 'confirmed' | 'pending' | 'waitlist') => {
+  const updateStatus = async (
+    id: string,
+    newStatus: 'approved' | 'confirmed' | 'pending' | 'rejected' | 'waitlist',
+    reason?: string
+  ) => {
     try {
       const res = await fetch(`/api/admin/enrolments/${id}`, {
         method: 'PATCH',
@@ -122,10 +145,11 @@ export function AdminDashboard() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ status: newStatus, rejectionReason: reason }),
       })
       if (res.ok) {
-        fetchAdminData()
+        await fetchAdminData()
+        setRejectingStudent(null)
       }
     } catch (err) {
       console.error('Failed to update status', err)
@@ -133,7 +157,7 @@ export function AdminDashboard() {
   }
 
   const deleteEnrolment = async (id: string, studentName: string) => {
-    if (!window.confirm(`Are you sure you want to remove ${studentName}'s enrolment?`)) return
+    if (!window.confirm(`Are you sure you want to remove ${studentName}'s enrolment record?`)) return
 
     try {
       const res = await fetch(`/api/admin/enrolments/${id}`, {
@@ -148,15 +172,21 @@ export function AdminDashboard() {
     }
   }
 
+  const handleCopyUtr = (id: string, utr: string) => {
+    navigator.clipboard?.writeText(utr)
+    setCopiedUtrId(id)
+    setTimeout(() => setCopiedUtrId(null), 2000)
+  }
+
   const exportCSV = () => {
     if (enrolments.length === 0) {
       alert('No enrolments to export.')
       return
     }
 
-    const headers = ['Enrolment ID,Name,Email,Phone,Company,Plan,Amount (INR),Status,Workflow Goal,Date']
+    const headers = ['Enrolment ID,Name,Email,Phone,Company,Plan,Amount (INR),Status,UTR / Transaction ID,Rejection Reason,Date']
     const rows = enrolments.map((e) =>
-      `"${e.id}","${e.name}","${e.email}","${e.phone}","${e.company}","${e.planLabel}","${e.amount}","${e.status}","${e.workflowGoal.replace(/"/g, '""')}","${new Date(e.enrolledAt).toLocaleString('en-IN')}"`,
+      `"${e.id}","${e.name}","${e.email}","${e.phone}","${e.company}","${e.planLabel}","${e.amount}","${e.status}","${e.utrNumber || ''}","${(e.rejectionReason || '').replace(/"/g, '""')}","${new Date(e.enrolledAt).toLocaleString('en-IN')}"`,
     )
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers, ...rows].join('\n')
     const encodedUri = encodeURI(csvContent)
@@ -168,15 +198,21 @@ export function AdminDashboard() {
     document.body.removeChild(link)
   }
 
+  const pendingCount = enrolments.filter((e) => e.status === 'pending').length
+  const approvedCount = enrolments.filter((e) => e.status === 'approved' || e.status === 'confirmed').length
+  const rejectedCount = enrolments.filter((e) => e.status === 'rejected').length
+
   const filteredEnrolments = enrolments.filter((e) => {
     const matchesSearch =
       e.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       e.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
       e.phone.includes(searchQuery) ||
+      (e.utrNumber && e.utrNumber.toLowerCase().includes(searchQuery.toLowerCase())) ||
       e.company.toLowerCase().includes(searchQuery.toLowerCase()) ||
       e.workflowGoal.toLowerCase().includes(searchQuery.toLowerCase())
 
     if (statusFilter === 'all') return matchesSearch
+    if (statusFilter === 'approved') return matchesSearch && (e.status === 'approved' || e.status === 'confirmed')
     return matchesSearch && e.status === statusFilter
   })
 
@@ -307,40 +343,40 @@ export function AdminDashboard() {
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
                 <div className="rounded-[16px] bg-surface-2/70 p-4 border border-line">
                   <div className="flex items-center justify-between">
-                    <span className="text-[12px] text-muted font-medium">Cohort 7 Seats</span>
-                    <Users className="size-4 text-accent" />
+                    <span className="text-[12px] text-muted font-medium">Approved Students</span>
+                    <Users className="size-4 text-emerald-400" />
                   </div>
                   <p className="mt-2 text-[26px] font-semibold text-fg tracking-tight">
-                    {stats.confirmedCount} <span className="text-[14px] font-normal text-muted">/ {stats.maxCohortSeats}</span>
+                    {approvedCount} <span className="text-[14px] font-normal text-muted">/ {stats.maxCohortSeats}</span>
                   </p>
                   <div className="mt-2 h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-accent rounded-full transition-all duration-500"
-                      style={{ width: `${(stats.confirmedCount / stats.maxCohortSeats) * 100}%` }}
+                      className="h-full bg-emerald-400 rounded-full transition-all duration-500"
+                      style={{ width: `${(approvedCount / stats.maxCohortSeats) * 100}%` }}
                     />
                   </div>
                 </div>
 
                 <div className="rounded-[16px] bg-surface-2/70 p-4 border border-line">
                   <div className="flex items-center justify-between">
-                    <span className="text-[12px] text-muted font-medium">Seats Remaining</span>
-                    <UserCheck className="size-4 text-accent-2" />
+                    <span className="text-[12px] text-muted font-medium">Pending Verification</span>
+                    <Clock className="size-4 text-amber-400 animate-pulse" />
                   </div>
-                  <p className="mt-2 text-[26px] font-semibold text-accent-2 tracking-tight">
-                    {stats.seatsRemaining}
+                  <p className="mt-2 text-[26px] font-semibold text-amber-400 tracking-tight">
+                    {pendingCount}
                   </p>
-                  <p className="text-[11px] text-muted mt-1">Capped strictly at 6 students</p>
+                  <p className="text-[11px] text-muted mt-1">Requires admin review</p>
                 </div>
 
                 <div className="rounded-[16px] bg-surface-2/70 p-4 border border-line">
                   <div className="flex items-center justify-between">
-                    <span className="text-[12px] text-muted font-medium">Enrolment Revenue</span>
+                    <span className="text-[12px] text-muted font-medium">Verified Revenue</span>
                     <TrendingUp className="size-4 text-accent" />
                   </div>
                   <p className="mt-2 text-[26px] font-semibold text-fg tracking-tight">
                     ₹{stats.totalRevenue.toLocaleString('en-IN')}
                   </p>
-                  <p className="text-[11px] text-muted mt-1">Confirmed student pipeline</p>
+                  <p className="text-[11px] text-muted mt-1">From approved transactions</p>
                 </div>
 
                 <div className="rounded-[16px] bg-surface-2/70 p-4 border border-line">
@@ -361,36 +397,45 @@ export function AdminDashboard() {
                 </div>
               </div>
 
-              {/* Roster Controls: Search & Filter */}
+              {/* Roster Controls: Search & Filter Tabs */}
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-surface-2/40 p-3 rounded-[14px] border border-line">
                 <div className="relative w-full sm:w-80">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted" />
                   <input
                     type="text"
-                    placeholder="Search by student, email, phone, company..."
+                    placeholder="Search by name, email, phone, UTR..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full rounded-[10px] bg-surface-2 px-3 py-1.5 pl-9 text-[13px] text-fg placeholder:text-muted/60 focus:outline-none focus:ring-1 focus:ring-accent"
                   />
                 </div>
 
-                <div className="flex items-center gap-2 w-full sm:w-auto">
-                  <span className="text-[12px] text-muted flex items-center gap-1">
+                <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto">
+                  <span className="text-[12px] text-muted flex items-center gap-1 shrink-0">
                     <Filter className="size-3.5" /> Filter:
                   </span>
-                  {(['all', 'confirmed', 'pending'] as const).map((filter) => (
+                  {[
+                    { key: 'all' as const, label: `All (${enrolments.length})` },
+                    { key: 'pending' as const, label: `Pending (${pendingCount})` },
+                    { key: 'approved' as const, label: `Approved (${approvedCount})` },
+                    { key: 'rejected' as const, label: `Rejected (${rejectedCount})` },
+                  ].map((filter) => (
                     <button
-                      key={filter}
+                      key={filter.key}
                       type="button"
-                      onClick={() => setStatusFilter(filter)}
+                      onClick={() => setStatusFilter(filter.key)}
                       className={cx(
-                        'rounded-[8px] px-3 py-1 text-[12px] font-medium capitalize transition-colors cursor-pointer',
-                        statusFilter === filter
-                          ? 'bg-accent text-bg font-semibold'
+                        'rounded-[8px] px-3 py-1 text-[12px] font-medium transition-colors cursor-pointer shrink-0',
+                        statusFilter === filter.key
+                          ? filter.key === 'pending'
+                            ? 'bg-amber-500 text-bg font-semibold'
+                            : filter.key === 'rejected'
+                            ? 'bg-red-500 text-white font-semibold'
+                            : 'bg-accent text-bg font-semibold'
                           : 'bg-surface-2 text-muted hover:text-fg',
                       )}
                     >
-                      {filter}
+                      {filter.label}
                     </button>
                   ))}
                 </div>
@@ -403,97 +448,246 @@ export function AdminDashboard() {
                     <thead className="bg-surface-2/90 text-muted uppercase text-[11px] tracking-wider border-b border-line">
                       <tr>
                         <th className="py-3 px-4">Student</th>
-                        <th className="py-3 px-4">Contact</th>
-                        <th className="py-3 px-4">Organization</th>
-                        <th className="py-3 px-4">Plan & Amount</th>
-                        <th className="py-3 px-4">Target Workflow Project</th>
+                        <th className="py-3 px-4">Contact & Org</th>
+                        <th className="py-3 px-4">Plan & Fee</th>
+                        <th className="py-3 px-4">Payment & UTR</th>
                         <th className="py-3 px-4">Status</th>
-                        <th className="py-3 px-4 text-right">Actions</th>
+                        <th className="py-3 px-4 text-right">Verification Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-line">
                       {filteredEnrolments.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="py-12 text-center text-muted">
+                          <td colSpan={6} className="py-12 text-center text-muted">
                             <User className="size-8 mx-auto mb-2 opacity-40" />
-                            {searchQuery ? 'No student matches your search query.' : 'No students enrolled yet. As real users enrol on the site, they will appear here in real time.'}
+                            {searchQuery ? 'No student matches your search query.' : 'No student records match this filter.'}
                           </td>
                         </tr>
                       ) : (
-                        filteredEnrolments.map((student) => (
-                          <tr key={student.id} className="hover:bg-white/[0.02] transition-colors">
-                            {/* Student Name */}
-                            <td className="py-3 px-4">
-                              <div className="font-semibold text-fg">{student.name}</div>
-                              <div className="text-[11px] font-mono text-muted">{student.id}</div>
-                            </td>
+                        filteredEnrolments.map((student) => {
+                          const isApproved = student.status === 'approved' || student.status === 'confirmed'
+                          const isPending = student.status === 'pending'
+                          const isRejected = student.status === 'rejected'
 
-                            {/* Contact */}
-                            <td className="py-3 px-4">
-                              <a href={`mailto:${student.email}`} className="text-fg hover:text-accent flex items-center gap-1.5">
-                                <Mail className="size-3 text-muted shrink-0" />
-                                <span className="truncate max-w-[150px]">{student.email}</span>
-                              </a>
-                              <a href={`tel:${student.phone}`} className="text-muted hover:text-fg text-[12px] flex items-center gap-1.5 mt-0.5">
-                                <Phone className="size-3 text-muted shrink-0" />
-                                {student.phone}
-                              </a>
-                            </td>
+                          return (
+                            <tr key={student.id} className="hover:bg-white/[0.02] transition-colors">
+                              {/* Student Name */}
+                              <td className="py-3 px-4">
+                                <div className="font-semibold text-fg">{student.name}</div>
+                                <div className="text-[11px] font-mono text-muted">{student.id}</div>
+                                <div className="text-[11px] text-faint mt-0.5 line-clamp-1 max-w-[150px]" title={student.workflowGoal}>
+                                  {student.workflowGoal}
+                                </div>
+                              </td>
 
-                            {/* Company */}
-                            <td className="py-3 px-4 text-muted truncate max-w-[120px]">
-                              {student.company || 'Independent'}
-                            </td>
+                              {/* Contact */}
+                              <td className="py-3 px-4">
+                                <a href={`mailto:${student.email}`} className="text-fg hover:text-accent flex items-center gap-1.5">
+                                  <Mail className="size-3 text-muted shrink-0" />
+                                  <span className="truncate max-w-[140px]">{student.email}</span>
+                                </a>
+                                <a href={`tel:${student.phone}`} className="text-muted hover:text-fg text-[12px] flex items-center gap-1.5 mt-0.5">
+                                  <Phone className="size-3 text-muted shrink-0" />
+                                  {student.phone}
+                                </a>
+                                <div className="text-[11.5px] text-muted/70 mt-0.5 truncate max-w-[120px]">
+                                  {student.company || 'Independent'}
+                                </div>
+                              </td>
 
-                            {/* Plan & Amount */}
-                            <td className="py-3 px-4">
-                              <span className="font-semibold text-fg">₹{student.amount.toLocaleString('en-IN')}</span>
-                              <div className="text-[11px] text-muted">{student.planLabel}</div>
-                            </td>
+                              {/* Plan & Amount */}
+                              <td className="py-3 px-4">
+                                <span className="font-semibold text-fg">₹{student.amount.toLocaleString('en-IN')}</span>
+                                <div className="text-[11px] text-muted">{student.planLabel}</div>
+                              </td>
 
-                            {/* Workflow Goal */}
-                            <td className="py-3 px-4">
-                              <p className="line-clamp-2 max-w-[220px] text-[12px] text-fg/90" title={student.workflowGoal}>
-                                {student.workflowGoal}
-                              </p>
-                            </td>
-
-                            {/* Status */}
-                            <td className="py-3 px-4">
-                              <select
-                                value={student.status}
-                                onChange={(e) => updateStatus(student.id, e.target.value as any)}
-                                className={cx(
-                                  'rounded-[8px] px-2 py-1 text-[11px] font-semibold border cursor-pointer focus:outline-none',
-                                  student.status === 'confirmed' && 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-                                  student.status === 'pending' && 'bg-amber-500/15 text-amber-400 border-amber-500/30',
-                                  student.status === 'waitlist' && 'bg-accent/15 text-accent border-accent/30',
+                              {/* Payment & UTR */}
+                              <td className="py-3 px-4">
+                                {student.utrNumber ? (
+                                  <div className="space-y-1">
+                                    <div className="inline-flex items-center gap-1.5 font-mono text-[12px] bg-black/60 px-2 py-0.5 rounded border border-line text-fg">
+                                      <span className="select-all font-semibold">{student.utrNumber}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleCopyUtr(student.id, student.utrNumber!)}
+                                        className="text-muted hover:text-fg p-0.5 rounded cursor-pointer"
+                                        title="Copy UTR Number"
+                                      >
+                                        {copiedUtrId === student.id ? (
+                                          <Check className="size-3 text-emerald-400" />
+                                        ) : (
+                                          <Copy className="size-3" />
+                                        )}
+                                      </button>
+                                    </div>
+                                    <div className="text-[11px] text-muted flex items-center gap-1">
+                                      <span className="text-accent font-medium">{student.paymentMethod || 'UPI'}</span>
+                                      <span>·</span>
+                                      <span>{new Date(student.enrolledAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span className="text-muted text-[11.5px] italic">No UTR submitted</span>
                                 )}
-                              >
-                                <option value="confirmed" className="bg-surface text-fg">Confirmed</option>
-                                <option value="pending" className="bg-surface text-fg">Pending</option>
-                                <option value="waitlist" className="bg-surface text-fg">Waitlist</option>
-                              </select>
-                            </td>
+                              </td>
 
-                            {/* Action */}
-                            <td className="py-3 px-4 text-right">
-                              <button
-                                type="button"
-                                onClick={() => deleteEnrolment(student.id, student.name)}
-                                className="size-8 grid place-items-center rounded-[8px] text-muted hover:bg-accent-3/15 hover:text-accent-3 transition-colors ml-auto cursor-pointer"
-                                title="Remove Enrolment"
-                              >
-                                <Trash2 className="size-4" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))
+                              {/* Status */}
+                              <td className="py-3 px-4">
+                                {isApproved && (
+                                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-2.5 py-1 text-[11px] font-semibold">
+                                    <CheckCircle2 className="size-3" /> Approved
+                                  </span>
+                                )}
+                                {isPending && (
+                                  <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30 px-2.5 py-1 text-[11px] font-semibold">
+                                    <span className="size-1.5 rounded-full bg-amber-400 animate-pulse" /> Pending
+                                  </span>
+                                )}
+                                {isRejected && (
+                                  <div className="space-y-0.5">
+                                    <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 text-red-400 border border-red-500/30 px-2 py-0.5 text-[11px] font-semibold">
+                                      <Ban className="size-3" /> Rejected
+                                    </span>
+                                    {student.rejectionReason && (
+                                      <p className="text-[10.5px] text-red-300/80 truncate max-w-[140px]" title={student.rejectionReason}>
+                                        {student.rejectionReason}
+                                      </p>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+
+                              {/* Action Buttons */}
+                              <td className="py-3 px-4 text-right">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  {!isApproved && (
+                                    <button
+                                      type="button"
+                                      onClick={() => updateStatus(student.id, 'approved')}
+                                      className="inline-flex items-center gap-1 rounded-[8px] bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 px-2.5 py-1.5 text-[11.5px] font-semibold transition-colors cursor-pointer"
+                                      title="Verify payment and unlock Google Meet & session materials"
+                                    >
+                                      <Check className="size-3" /> Approve
+                                    </button>
+                                  )}
+
+                                  {!isRejected && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setRejectingStudent(student)
+                                        setRejectionReason('UTR number not found in bank statement.')
+                                      }}
+                                      className="inline-flex items-center gap-1 rounded-[8px] bg-red-500/15 hover:bg-red-500/25 text-red-400 border border-red-500/30 px-2.5 py-1.5 text-[11.5px] font-semibold transition-colors cursor-pointer"
+                                      title="Reject payment transaction"
+                                    >
+                                      <Ban className="size-3" /> Reject
+                                    </button>
+                                  )}
+
+                                  {(isApproved || isRejected) && (
+                                    <button
+                                      type="button"
+                                      onClick={() => updateStatus(student.id, 'pending')}
+                                      className="text-muted hover:text-fg text-[11px] px-1 hover:underline cursor-pointer"
+                                      title="Reset status back to Pending"
+                                    >
+                                      Reset
+                                    </button>
+                                  )}
+
+                                  <button
+                                    type="button"
+                                    onClick={() => deleteEnrolment(student.id, student.name)}
+                                    className="size-7 grid place-items-center rounded-[6px] text-muted/60 hover:bg-accent-3/15 hover:text-accent-3 transition-colors cursor-pointer"
+                                    title="Delete Record"
+                                  >
+                                    <Trash2 className="size-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })
                       )}
                     </tbody>
                   </table>
                 </div>
               </div>
+
+              {/* Rejection Modal Dialog */}
+              {rejectingStudent && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+                  <div className="w-full max-w-md rounded-[16px] bg-surface p-6 border border-line shadow-glow">
+                    <div className="flex items-center justify-between pb-3 border-b border-line">
+                      <h4 className="text-[16px] font-semibold text-fg flex items-center gap-2">
+                        <Ban className="size-4 text-red-400" /> Reject Payment Verification
+                      </h4>
+                      <button
+                        type="button"
+                        onClick={() => setRejectingStudent(null)}
+                        className="text-muted hover:text-fg p-1 rounded cursor-pointer"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    </div>
+                    <p className="text-[13px] text-muted mt-3">
+                      Rejecting will notify <strong className="text-fg">{rejectingStudent.name}</strong> ({rejectingStudent.email}) and require them to resubmit valid payment details.
+                    </p>
+
+                    <div className="mt-4">
+                      <label className="block text-[12px] font-medium text-fg mb-1.5">Select Reason for Rejection:</label>
+                      <div className="space-y-1.5 mb-3">
+                        {[
+                          'UTR number not found in bank statement.',
+                          'Payment amount does not match plan price.',
+                          'Duplicate or invalid transaction ID submitted.',
+                          'Bank payment is still pending/processing.',
+                        ].map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setRejectionReason(preset)}
+                            className={cx(
+                              'w-full text-left text-[11.5px] p-2 rounded-[8px] border transition-colors cursor-pointer',
+                              rejectionReason === preset
+                                ? 'bg-red-500/15 border-red-500/40 text-red-300 font-medium'
+                                : 'bg-surface-2 border-line text-muted hover:text-fg'
+                            )}
+                          >
+                            {preset}
+                          </button>
+                        ))}
+                      </div>
+
+                      <textarea
+                        rows={2}
+                        value={rejectionReason}
+                        onChange={(e) => setRejectionReason(e.target.value)}
+                        placeholder="Custom rejection note for the student..."
+                        className="w-full rounded-[10px] bg-surface-2 p-2.5 text-[12.5px] text-fg border border-line focus:outline-none focus:ring-1 focus:ring-red-400 resize-none"
+                      />
+                    </div>
+
+                    <div className="mt-5 flex items-center justify-end gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setRejectingStudent(null)}
+                        className="px-4 py-2 rounded-[10px] bg-surface-2 text-[12.5px] text-muted hover:text-fg cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateStatus(rejectingStudent.id, 'rejected', rejectionReason)}
+                        className="px-4 py-2 rounded-[10px] bg-red-500 hover:bg-red-600 text-[12.5px] font-semibold text-white transition-colors cursor-pointer"
+                      >
+                        Confirm Rejection
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Footer */}
               <div className="flex items-center justify-between border-t border-line pt-3 text-[12px] text-muted">

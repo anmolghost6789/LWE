@@ -4,7 +4,11 @@ import {
   ArrowRight,
   Building2,
   Calendar,
-  CheckCircle2,
+  Check,
+  Clock,
+  Copy,
+  CreditCard,
+  FileCheck,
   Lock,
   Mail,
   Phone,
@@ -52,6 +56,9 @@ export function JoinCohortModal() {
   const [company, setCompany] = useState('')
   const [password, setPassword] = useState('')
   const [workflowGoal, setWorkflowGoal] = useState('')
+  const [utrNumber, setUtrNumber] = useState('')
+  const [upiCopied, setUpiCopied] = useState(false)
+  const [submittedUtr, setSubmittedUtr] = useState('')
   const [plan, setPlan] = useState<'bootcamp_full' | 'bootcamp_instalment' | 'recordings' | 'team'>(selectedPlan || 'bootcamp_full')
   const [agreed, setAgreed] = useState(true)
 
@@ -61,6 +68,8 @@ export function JoinCohortModal() {
   const [enrolmentId, setEnrolmentId] = useState('')
 
   if (!isJoinCohortOpen) return null
+
+  const selectedPlanPrice = plan === 'bootcamp_full' ? 9999 : plan === 'bootcamp_instalment' ? 3999 : plan === 'team' ? 39999 : 0
 
   const validate = () => {
     const errs: Record<string, string> = {}
@@ -83,6 +92,9 @@ export function JoinCohortModal() {
     }
     if (!workflowGoal.trim() || workflowGoal.trim().length < 5) {
       errs.workflowGoal = 'Please specify what workflow or use-case you want to build.'
+    }
+    if (plan !== 'recordings' && (!utrNumber.trim() || utrNumber.trim().length < 6)) {
+      errs.utrNumber = 'Please enter your 12-digit UTR Number / UPI Transaction ID.'
     }
     if (!agreed) {
       errs.agreed = 'You must agree to cohort terms to complete enrolment.'
@@ -107,10 +119,13 @@ export function JoinCohortModal() {
       password,
       plan,
       workflowGoal: workflowGoal.trim(),
+      utrNumber: utrNumber.trim(),
+      paymentMethod: 'UPI',
     })
 
     if (result.ok && result.enrolment) {
       setEnrolmentId(result.enrolment.id)
+      setSubmittedUtr(utrNumber.trim())
       setStatus('success')
     } else {
       setStatus('idle')
@@ -187,20 +202,37 @@ export function JoinCohortModal() {
 
           {status === 'success' ? (
             <div className="py-6 text-center">
-              <div className="mx-auto flex size-16 items-center justify-center rounded-full bg-accent/15 text-accent shadow-[0_0_30px_rgba(255,122,69,0.3)]">
-                <CheckCircle2 className="size-9" />
+              <div className="mx-auto flex size-16 items-center justify-center rounded-full bg-amber-500/15 text-amber-400 shadow-[0_0_30px_rgba(245,158,11,0.25)]">
+                <Clock className="size-9 animate-pulse" />
               </div>
               <h3 className="mt-5 text-[24px] font-semibold tracking-tight text-fg">
-                You Are Enrolled in Cohort 7!
+                Payment Details Submitted!
               </h3>
               <p className="mt-2 text-[15px] text-muted max-w-md mx-auto">
-                Welcome aboard, <strong className="text-fg">{name}</strong>. Your seat is confirmed for the GenAI bootcamp starting 17 November.
+                Thank you, <strong className="text-fg">{name}</strong>. Your enrolment request and transaction details have been received.
               </p>
 
-              <div className="my-6 rounded-card-sm bg-surface-2/80 p-4 border border-line inline-block text-left">
-                <p className="text-[12px] uppercase tracking-wider text-muted font-medium">Official Enrolment ID</p>
-                <p className="text-[19px] font-mono font-semibold text-accent mt-0.5">{enrolmentId}</p>
-                <p className="text-[12px] text-faint mt-1">Confirmation and session calendar sent to {email}</p>
+              <div className="my-6 rounded-card-sm bg-surface-2/80 p-5 border border-line text-left max-w-md mx-auto space-y-3">
+                <div className="flex items-center justify-between border-b border-line pb-2.5">
+                  <span className="text-[12px] uppercase tracking-wider text-muted font-medium">Official Enrolment ID</span>
+                  <span className="text-[16px] font-mono font-semibold text-accent">{enrolmentId}</span>
+                </div>
+                {submittedUtr && (
+                  <div className="flex items-center justify-between border-b border-line pb-2.5">
+                    <span className="text-[12px] text-muted">Submitted UTR / Ref:</span>
+                    <span className="text-[14px] font-mono text-fg bg-black/40 px-2 py-0.5 rounded">{submittedUtr}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <span className="text-[12px] text-muted">Verification Status:</span>
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30 px-2.5 py-0.5 text-[11px] font-semibold">
+                    <span className="size-1.5 rounded-full bg-amber-400 animate-pulse" />
+                    Pending Admin Approval
+                  </span>
+                </div>
+                <p className="text-[11.5px] text-muted/90 pt-1 leading-relaxed">
+                  Our admissions team is verifying your payment with our bank statement. Once verified, your account will be activated and your Google Meet live room link will unlock.
+                </p>
               </div>
 
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
@@ -465,6 +497,84 @@ export function JoinCohortModal() {
                   </div>
                   {errors.password && <p className="mt-1 text-[12px] text-accent-3">{errors.password}</p>}
                 </div>
+
+                {/* DIRECT UPI PAYMENT & UTR VERIFICATION SECTION */}
+                {plan !== 'recordings' && (
+                  <div className="rounded-[14px] bg-surface-2/90 border border-accent/30 p-4 relative overflow-hidden">
+                    <div className="flex items-center justify-between pb-3 border-b border-line">
+                      <div className="flex items-center gap-2">
+                        <div className="size-7 rounded-full bg-accent/20 grid place-items-center text-accent">
+                          <CreditCard className="size-4" />
+                        </div>
+                        <div>
+                          <p className="text-[13px] font-semibold text-fg">Direct Payment & UTR Verification</p>
+                          <p className="text-[11px] text-muted">Amount Payable: <strong className="text-accent text-[12.5px]">₹{selectedPlanPrice.toLocaleString('en-IN')}</strong></p>
+                        </div>
+                      </div>
+                      <span className="rounded-full bg-accent-2/15 border border-accent-2/30 px-2 py-0.5 text-[11px] font-medium text-accent-2">
+                        UPI / Bank Transfer
+                      </span>
+                    </div>
+
+                    <div className="mt-3 grid sm:grid-cols-2 gap-2.5 text-[12px]">
+                      <div className="rounded-[10px] bg-black/40 border border-line p-2.5">
+                        <span className="text-muted block text-[11px]">Primary UPI ID:</span>
+                        <div className="flex items-center justify-between mt-1">
+                          <code className="text-accent font-mono font-semibold text-[13px] select-all">7488659839@upi</code>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard?.writeText('7488659839@upi')
+                              setUpiCopied(true)
+                              setTimeout(() => setUpiCopied(false), 2000)
+                            }}
+                            className="text-muted hover:text-fg text-[11px] inline-flex items-center gap-1 bg-white/10 px-2 py-0.5 rounded-[6px] cursor-pointer"
+                          >
+                            {upiCopied ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
+                            {upiCopied ? 'Copied!' : 'Copy'}
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-muted/80 mt-1">GPay, PhonePe, Paytm, BHIM</p>
+                      </div>
+
+                      <div className="rounded-[10px] bg-black/40 border border-line p-2.5">
+                        <span className="text-muted block text-[11px]">Beneficiary Name:</span>
+                        <p className="text-fg font-medium mt-1 truncate">LearnWithExpert · Anmol</p>
+                        <p className="text-[10px] text-emerald-400 mt-1 flex items-center gap-1">
+                          <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" /> Verified Admissions Account
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* UTR Number Input */}
+                    <div className="mt-3.5">
+                      <label htmlFor="enrol-utr" className="block text-[12.5px] font-medium text-fg">
+                        Enter 12-Digit UTR Number / UPI Transaction ID <span className="text-accent">*</span>
+                      </label>
+                      <div className="relative mt-1.5">
+                        <FileCheck className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-accent" />
+                        <input
+                          id="enrol-utr"
+                          type="text"
+                          placeholder="e.g. 432109876543 (from UPI app payment receipt)"
+                          value={utrNumber}
+                          onChange={(e) => {
+                            setUtrNumber(e.target.value.trim())
+                            if (errors.utrNumber) setErrors((prev) => ({ ...prev, utrNumber: '' }))
+                          }}
+                          className={cx(
+                            'depth w-full rounded-[10px] bg-black/60 px-4 py-2.5 pl-10 text-[13.5px] font-mono text-fg placeholder:text-muted/50 transition-colors focus:outline-none',
+                            errors.utrNumber ? 'border border-accent-3 focus:ring-1 focus:ring-accent-3' : 'focus:ring-1 focus:ring-accent',
+                          )}
+                        />
+                      </div>
+                      {errors.utrNumber && <p className="mt-1 text-[12px] text-accent-3">{errors.utrNumber}</p>}
+                      <p className="mt-1 text-[11px] text-muted">
+                        Pay ₹{selectedPlanPrice.toLocaleString('en-IN')} via UPI, then copy the 12-digit UTR/Ref ID from your payment receipt and paste here for admin verification.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Guarantee & Terms Agreement */}
                 <div className="pt-1">

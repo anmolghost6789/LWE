@@ -34,9 +34,14 @@ export interface Enrolment {
   plan: 'bootcamp_full' | 'bootcamp_instalment' | 'recordings' | 'team'
   planLabel: string
   amount: number
-  status: 'confirmed' | 'pending' | 'waitlist'
+  status: 'confirmed' | 'approved' | 'pending' | 'rejected' | 'waitlist'
   workflowGoal: string
   enrolledAt: string
+  utrNumber?: string
+  paymentMethod?: string
+  rejectionReason?: string
+  verifiedAt?: string
+  verifiedBy?: string
 }
 
 export interface Session {
@@ -118,7 +123,7 @@ async function ensureNeonTables(): Promise<boolean> {
       );
     `
 
-    // 3. Create Enrolments Table
+    // 3. Create or Migrate Enrolments Table with UTR & Payment Verification columns
     await sql`
       CREATE TABLE IF NOT EXISTS enrolments (
         id VARCHAR(64) PRIMARY KEY,
@@ -132,11 +137,23 @@ async function ensureNeonTables(): Promise<boolean> {
         plan VARCHAR(50) NOT NULL,
         plan_label VARCHAR(100) NOT NULL,
         amount INTEGER NOT NULL,
-        status VARCHAR(20) DEFAULT 'confirmed',
+        status VARCHAR(20) DEFAULT 'pending',
         workflow_goal TEXT,
-        enrolled_at TIMESTAMPTZ DEFAULT NOW()
+        enrolled_at TIMESTAMPTZ DEFAULT NOW(),
+        utr_number VARCHAR(100),
+        payment_method VARCHAR(50) DEFAULT 'UPI',
+        rejection_reason TEXT,
+        verified_at TIMESTAMPTZ,
+        verified_by VARCHAR(100)
       );
     `
+
+    // Ensure columns exist if table was previously created
+    await sql`ALTER TABLE enrolments ADD COLUMN IF NOT EXISTS utr_number VARCHAR(100);`
+    await sql`ALTER TABLE enrolments ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'UPI';`
+    await sql`ALTER TABLE enrolments ADD COLUMN IF NOT EXISTS rejection_reason TEXT;`
+    await sql`ALTER TABLE enrolments ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;`
+    await sql`ALTER TABLE enrolments ADD COLUMN IF NOT EXISTS verified_by VARCHAR(100);`
 
     // 4. Ensure master admin user exists in Neon
     await sql`
@@ -291,6 +308,11 @@ function formatEnrolment(e: any): Enrolment {
     status: e.status,
     workflowGoal: e.workflowGoal || e.workflow_goal,
     enrolledAt: e.enrolledAt || e.enrolled_at,
+    utrNumber: e.utrNumber || e.utr_number || '',
+    paymentMethod: e.paymentMethod || e.payment_method || 'UPI',
+    rejectionReason: e.rejectionReason || e.rejection_reason || '',
+    verifiedAt: e.verifiedAt || e.verified_at || '',
+    verifiedBy: e.verifiedBy || e.verified_by || '',
   }
 }
 
@@ -456,6 +478,8 @@ export default async function handler(req: any, res?: any) {
       role?: string
       workflowGoal?: string
       plan?: string
+      utrNumber?: string
+      paymentMethod?: string
     }>(req)
 
     const name = body.name?.trim() ?? ''
@@ -466,6 +490,9 @@ export default async function handler(req: any, res?: any) {
     const studentRole = body.role?.trim() || 'Software Developer'
     const workflowGoal = body.workflowGoal?.trim() || 'Custom GenAI Workflow'
     const planKey = (body.plan && PLAN_PRICES[body.plan]) ? body.plan : 'bootcamp_full'
+    const utrNumber = (body.utrNumber || '').trim()
+    const paymentMethod = (body.paymentMethod || 'UPI').trim()
+    const initialStatus = planKey === 'recordings' ? 'approved' : 'pending'
 
     if (!name || name.length < 2) return sendJson(res, 400, { error: 'Please enter your full name (minimum 2 characters).' })
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return sendJson(res, 400, { error: 'Please enter a valid email address.' })
@@ -491,10 +518,10 @@ export default async function handler(req: any, res?: any) {
         VALUES (${userId}, ${name}, ${email}, ${phone}, ${company || studentRole}, ${passwordHash}, 'student', 'Cohort 7 (Starts 17 Nov)', NOW())
       `
 
-      // Insert Enrolment
+      // Insert Enrolment with UTR & Payment Status
       await sql`
-        INSERT INTO enrolments (id, user_id, name, email, phone, country_code, company, cohort, plan, plan_label, amount, status, workflow_goal, enrolled_at)
-        VALUES (${enrolmentId}, ${userId}, ${name}, ${email}, ${phone || 'Not specified'}, '+91', ${company || 'Independent Builder'}, 'Cohort 7 (Starts 17 Nov)', ${planKey}, ${planDetails.label}, ${planDetails.amount}, 'confirmed', ${workflowGoal}, NOW())
+        INSERT INTO enrolments (id, user_id, name, email, phone, country_code, company, cohort, plan, plan_label, amount, status, workflow_goal, enrolled_at, utr_number, payment_method)
+        VALUES (${enrolmentId}, ${userId}, ${name}, ${email}, ${phone || 'Not specified'}, '+91', ${company || 'Independent Builder'}, 'Cohort 7 (Starts 17 Nov)', ${planKey}, ${planDetails.label}, ${planDetails.amount}, ${initialStatus}, ${workflowGoal}, NOW(), ${utrNumber || null}, ${paymentMethod})
       `
 
       // Insert Session
@@ -505,7 +532,9 @@ export default async function handler(req: any, res?: any) {
 
       return sendJson(res, 200, {
         ok: true,
-        message: 'Account created and successfully enrolled in Cohort 7!',
+        message: initialStatus === 'approved' 
+          ? 'Account created and enrolled successfully!'
+          : 'Account created! Payment details submitted for admin verification.',
         user: { id: userId, name, email, phone, company: company || studentRole, role: 'student', cohort: 'Cohort 7 (Starts 17 Nov)' },
         enrolment: {
           id: enrolmentId,
@@ -519,9 +548,11 @@ export default async function handler(req: any, res?: any) {
           plan: planKey,
           planLabel: planDetails.label,
           amount: planDetails.amount,
-          status: 'confirmed',
+          status: initialStatus,
           workflowGoal,
           enrolledAt: new Date().toISOString(),
+          utrNumber,
+          paymentMethod,
         },
         token,
       })
@@ -558,9 +589,12 @@ export default async function handler(req: any, res?: any) {
       plan: planKey as any,
       planLabel: planDetails.label,
       amount: planDetails.amount,
-      status: 'confirmed',
+      status: initialStatus as any,
       workflowGoal,
       enrolledAt: new Date().toISOString(),
+      utrNumber,
+      paymentMethod,
+    }
     }
     fallback.enrolments.unshift(newEnrolment)
     fallback.sessions[token] = { userId, expiresAt }
@@ -889,6 +923,8 @@ export default async function handler(req: any, res?: any) {
       password?: string
       plan?: string
       workflowGoal?: string
+      utrNumber?: string
+      paymentMethod?: string
     }>(req)
 
     const name = body.name?.trim() ?? ''
@@ -900,12 +936,18 @@ export default async function handler(req: any, res?: any) {
     const planKey = (body.plan && PLAN_PRICES[body.plan]) ? body.plan : 'bootcamp_full'
     const planDetails = PLAN_PRICES[planKey]
     const workflowGoal = body.workflowGoal?.trim() || 'Custom GenAI Workflow Development'
+    const utrNumber = (body.utrNumber || '').trim()
+    const paymentMethod = (body.paymentMethod || 'UPI').trim()
+    const status = planKey === 'recordings' ? 'approved' : 'pending'
     const enrolmentId = `ENR-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`
     const token = generateToken()
     const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000
 
     if (!name || name.length < 2) return sendJson(res, 400, { error: 'Please enter your full name.' })
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return sendJson(res, 400, { error: 'Please enter a valid email.' })
+    if (planKey !== 'recordings' && (!utrNumber || utrNumber.length < 6)) {
+      return sendJson(res, 400, { error: 'Please enter a valid 12-digit UTR Number / UPI Transaction ID.' })
+    }
 
     if (isNeonReady) {
       let rows = await sql`SELECT * FROM users WHERE email = ${email} LIMIT 1`
@@ -930,10 +972,10 @@ export default async function handler(req: any, res?: any) {
       // Create session
       await sql`INSERT INTO sessions (token, user_id, expires_at) VALUES (${token}, ${userId}, ${expiresAt})`
 
-      // Create enrolment
+      // Create enrolment with UTR & pending status
       await sql`
-        INSERT INTO enrolments (id, user_id, name, email, phone, country_code, company, cohort, plan, plan_label, amount, status, workflow_goal, enrolled_at)
-        VALUES (${enrolmentId}, ${userId}, ${name}, ${email}, ${phone || 'Not specified'}, ${countryCode}, ${company}, 'Cohort 7 (Starts 17 Nov)', ${planKey}, ${planDetails.label}, ${planDetails.amount}, 'confirmed', ${workflowGoal}, NOW())
+        INSERT INTO enrolments (id, user_id, name, email, phone, country_code, company, cohort, plan, plan_label, amount, status, workflow_goal, enrolled_at, utr_number, payment_method)
+        VALUES (${enrolmentId}, ${userId}, ${name}, ${email}, ${phone || 'Not specified'}, ${countryCode}, ${company}, 'Cohort 7 (Starts 17 Nov)', ${planKey}, ${planDetails.label}, ${planDetails.amount}, ${status}, ${workflowGoal}, NOW(), ${utrNumber || null}, ${paymentMethod})
       `
 
       const enrolmentObj = {
@@ -948,14 +990,18 @@ export default async function handler(req: any, res?: any) {
         plan: planKey,
         planLabel: planDetails.label,
         amount: planDetails.amount,
-        status: 'confirmed',
+        status,
         workflowGoal,
         enrolledAt: new Date().toISOString(),
+        utrNumber,
+        paymentMethod,
       }
 
       return sendJson(res, 200, {
         ok: true,
-        message: 'Enrolment confirmed successfully!',
+        message: status === 'approved' 
+          ? 'Enrolment confirmed successfully!'
+          : 'Payment details submitted! Awaiting administrator verification to activate live session access.',
         enrolment: enrolmentObj,
         user: sanitizeUser(user),
         token,
@@ -994,9 +1040,11 @@ export default async function handler(req: any, res?: any) {
       plan: planKey as any,
       planLabel: planDetails.label,
       amount: planDetails.amount,
-      status: 'confirmed',
+      status: status as any,
       workflowGoal,
       enrolledAt: new Date().toISOString(),
+      utrNumber,
+      paymentMethod,
     }
 
     fallback.enrolments.unshift(newEnrolment)
@@ -1005,10 +1053,71 @@ export default async function handler(req: any, res?: any) {
 
     return sendJson(res, 200, {
       ok: true,
-      message: 'Enrolment confirmed successfully!',
+      message: status === 'approved' 
+        ? 'Enrolment confirmed successfully!'
+        : 'Payment details submitted! Awaiting administrator verification to activate live session access.',
       enrolment: newEnrolment,
       user: sanitizeUser(user),
       token,
+    })
+  }
+
+  // -------------------------------------------------------------------------
+  // 7b. Resubmit UTR: POST /api/enrol/resubmit-utr
+  // -------------------------------------------------------------------------
+  if (pathname === '/api/enrol/resubmit-utr') {
+    if (req.method !== 'POST') return sendJson(res, 405, { error: 'Method not allowed' })
+
+    const body = await parseBody<{ utrNumber?: string; enrolmentId?: string }>(req)
+    const utr = (body.utrNumber || '').trim()
+    if (!utr || utr.length < 6) {
+      return sendJson(res, 400, { error: 'Please enter a valid 12-digit UTR Number / Transaction ID.' })
+    }
+
+    const token = getBearerToken(req)
+
+    if (isNeonReady) {
+      let targetId = body.enrolmentId
+      if (!targetId && token) {
+        const sRows = await sql`SELECT user_id FROM sessions WHERE token = ${token} AND expires_at > ${Date.now()} LIMIT 1`
+        if (sRows.length > 0) {
+          const eRows = await sql`SELECT id FROM enrolments WHERE user_id = ${sRows[0].user_id} ORDER BY enrolled_at DESC LIMIT 1`
+          if (eRows.length > 0) targetId = eRows[0].id
+        }
+      }
+
+      if (!targetId) {
+        return sendJson(res, 400, { error: 'Could not identify enrolment record to update.' })
+      }
+
+      const updated = await sql`
+        UPDATE enrolments
+        SET utr_number = ${utr}, status = 'pending', rejection_reason = NULL, verified_at = NULL, verified_by = NULL
+        WHERE id = ${targetId}
+        RETURNING *
+      `
+
+      if (updated.length === 0) return sendJson(res, 404, { error: 'Enrolment record not found.' })
+      return sendJson(res, 200, {
+        ok: true,
+        message: 'Payment details resubmitted successfully. Our team will verify your transaction shortly.',
+        enrolment: formatEnrolment(updated[0]),
+      })
+    }
+
+    // Fallback store
+    const fallback = await getFallbackDatabase()
+    const target = fallback.enrolments.find((e) => e.id === body.enrolmentId)
+    if (!target) return sendJson(res, 404, { error: 'Enrolment record not found.' })
+    target.utrNumber = utr
+    target.status = 'pending'
+    target.rejectionReason = undefined
+    await saveFallbackDatabase(fallback)
+
+    return sendJson(res, 200, {
+      ok: true,
+      message: 'Payment details resubmitted successfully. Our team will verify your transaction shortly.',
+      enrolment: target,
     })
   }
 
@@ -1034,17 +1143,22 @@ export default async function handler(req: any, res?: any) {
 
       const rows = await sql`SELECT * FROM enrolments ORDER BY enrolled_at DESC`
       const enrolments = rows.map(formatEnrolment)
-      const confirmedCount = enrolments.filter((e) => e.status === 'confirmed').length
-      const totalRevenue = enrolments.filter((e) => e.status === 'confirmed').reduce((sum, e) => sum + (e.amount || 0), 0)
+      const approvedCount = enrolments.filter((e) => e.status === 'approved' || e.status === 'confirmed').length
+      const pendingCount = enrolments.filter((e) => e.status === 'pending').length
+      const rejectedCount = enrolments.filter((e) => e.status === 'rejected').length
+      const totalRevenue = enrolments.filter((e) => e.status === 'approved' || e.status === 'confirmed').reduce((sum, e) => sum + (e.amount || 0), 0)
 
       return sendJson(res, 200, {
         enrolments,
         total: enrolments.length,
         stats: {
           totalEnrolments: enrolments.length,
-          confirmed: confirmedCount,
-          pending: enrolments.filter((e) => e.status === 'pending').length,
-          waitlist: enrolments.filter((e) => e.status === 'waitlist').length,
+          confirmedCount: approvedCount,
+          approvedCount,
+          pendingCount,
+          rejectedCount,
+          seatsRemaining: Math.max(0, 6 - approvedCount),
+          maxCohortSeats: 6,
           totalRevenue,
         },
       })
@@ -1058,17 +1172,22 @@ export default async function handler(req: any, res?: any) {
     if (!admin) return sendJson(res, 403, { error: 'Admin access required.' })
 
     const enrolments = fallback.enrolments
-    const confirmedCount = enrolments.filter((e) => e.status === 'confirmed').length
-    const totalRevenue = enrolments.filter((e) => e.status === 'confirmed').reduce((sum, e) => sum + (e.amount || 0), 0)
+    const approvedCount = enrolments.filter((e) => e.status === 'approved' || e.status === 'confirmed').length
+    const pendingCount = enrolments.filter((e) => e.status === 'pending').length
+    const rejectedCount = enrolments.filter((e) => e.status === 'rejected').length
+    const totalRevenue = enrolments.filter((e) => e.status === 'approved' || e.status === 'confirmed').reduce((sum, e) => sum + (e.amount || 0), 0)
 
     return sendJson(res, 200, {
       enrolments,
       total: enrolments.length,
       stats: {
         totalEnrolments: enrolments.length,
-        confirmed: confirmedCount,
-        pending: enrolments.filter((e) => e.status === 'pending').length,
-        waitlist: enrolments.filter((e) => e.status === 'waitlist').length,
+        confirmedCount: approvedCount,
+        approvedCount,
+        pendingCount,
+        rejectedCount,
+        seatsRemaining: Math.max(0, 6 - approvedCount),
+        maxCohortSeats: 6,
         totalRevenue,
       },
     })
@@ -1084,7 +1203,7 @@ export default async function handler(req: any, res?: any) {
 
     if (isNeonReady) {
       const userRows = await sql`
-        SELECT u.role 
+        SELECT u.role, u.email 
         FROM users u 
         JOIN sessions s ON u.id = s.user_id 
         WHERE s.token = ${token} AND s.expires_at > ${Date.now()}
@@ -1093,11 +1212,41 @@ export default async function handler(req: any, res?: any) {
       if (userRows.length === 0 || userRows[0].role !== 'admin') {
         return sendJson(res, 403, { error: 'Admin access required.' })
       }
+      const adminEmail = userRows[0].email
 
       if (req.method === 'PATCH') {
-        const body = await parseBody<{ status?: 'confirmed' | 'pending' | 'waitlist' }>(req)
-        if (body.status && ['confirmed', 'pending', 'waitlist'].includes(body.status)) {
-          const updated = await sql`UPDATE enrolments SET status = ${body.status} WHERE id = ${id} RETURNING *`
+        const body = await parseBody<{
+          status?: 'approved' | 'confirmed' | 'pending' | 'rejected' | 'waitlist'
+          rejectionReason?: string
+        }>(req)
+
+        if (body.status && ['approved', 'confirmed', 'pending', 'rejected', 'waitlist'].includes(body.status)) {
+          const isApproval = body.status === 'approved' || body.status === 'confirmed'
+          const isRejection = body.status === 'rejected'
+          const rejectionReason = isRejection ? (body.rejectionReason?.trim() || 'Payment details could not be matched with bank statement.') : null
+          const verifiedBy = (isApproval || isRejection) ? adminEmail : null
+
+          const updated = isApproval
+            ? await sql`
+                UPDATE enrolments 
+                SET status = ${body.status}, rejection_reason = NULL, verified_at = NOW(), verified_by = ${verifiedBy}
+                WHERE id = ${id} 
+                RETURNING *
+              `
+            : isRejection
+            ? await sql`
+                UPDATE enrolments 
+                SET status = ${body.status}, rejection_reason = ${rejectionReason}, verified_at = NOW(), verified_by = ${verifiedBy}
+                WHERE id = ${id} 
+                RETURNING *
+              `
+            : await sql`
+                UPDATE enrolments 
+                SET status = ${body.status}, rejection_reason = NULL, verified_at = NULL, verified_by = NULL
+                WHERE id = ${id} 
+                RETURNING *
+              `
+
           if (updated.length === 0) return sendJson(res, 404, { error: 'Enrolment not found.' })
           return sendJson(res, 200, { ok: true, enrolment: formatEnrolment(updated[0]) })
         }
@@ -1122,9 +1271,21 @@ export default async function handler(req: any, res?: any) {
     if (index === -1) return sendJson(res, 404, { error: 'Enrolment not found.' })
 
     if (req.method === 'PATCH') {
-      const body = await parseBody<{ status?: 'confirmed' | 'pending' | 'waitlist' }>(req)
-      if (body.status && ['confirmed', 'pending', 'waitlist'].includes(body.status)) {
-        fallback.enrolments[index].status = body.status
+      const body = await parseBody<{
+        status?: 'approved' | 'confirmed' | 'pending' | 'rejected' | 'waitlist'
+        rejectionReason?: string
+      }>(req)
+
+      if (body.status && ['approved', 'confirmed', 'pending', 'rejected', 'waitlist'].includes(body.status)) {
+        fallback.enrolments[index].status = body.status as any
+        if (body.status === 'rejected') {
+          fallback.enrolments[index].rejectionReason = body.rejectionReason?.trim() || 'Payment details could not be matched with bank statement.'
+        } else {
+          fallback.enrolments[index].rejectionReason = undefined
+        }
+        fallback.enrolments[index].verifiedAt = new Date().toISOString()
+        fallback.enrolments[index].verifiedBy = admin.email
+
         await saveFallbackDatabase(fallback)
         return sendJson(res, 200, { ok: true, enrolment: fallback.enrolments[index] })
       }
