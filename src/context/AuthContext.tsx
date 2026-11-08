@@ -23,14 +23,9 @@ export interface Enrolment {
   plan: 'bootcamp_full' | 'bootcamp_instalment' | 'recordings' | 'team'
   planLabel: string
   amount: number
-  status: 'confirmed' | 'approved' | 'pending' | 'rejected' | 'waitlist'
+  status: 'confirmed' | 'pending' | 'waitlist'
   workflowGoal: string
   enrolledAt: string
-  utrNumber?: string
-  paymentMethod?: string
-  rejectionReason?: string
-  verifiedAt?: string
-  verifiedBy?: string
 }
 
 interface ApiResponse {
@@ -50,8 +45,6 @@ interface EnrolData {
   password?: string
   plan: 'bootcamp_full' | 'bootcamp_instalment' | 'recordings' | 'team'
   workflowGoal: string
-  utrNumber?: string
-  paymentMethod?: string
 }
 
 interface AuthContextType {
@@ -82,10 +75,8 @@ interface AuthContextType {
 
   // API calls
   login: (email: string, password: string, rememberMe?: boolean) => Promise<{ ok: boolean; error?: string; isAdmin?: boolean }>
-  register: (name: string, email: string, password: string, phone?: string, company?: string, utrNumber?: string) => Promise<{ ok: boolean; error?: string }>
+  register: (name: string, email: string, password: string, phone?: string, company?: string) => Promise<{ ok: boolean; error?: string }>
   enrolStudent: (data: EnrolData) => Promise<{ ok: boolean; error?: string; enrolment?: Enrolment }>
-  resubmitUtr: (utrNumber: string, enrolmentId?: string) => Promise<{ ok: boolean; error?: string; enrolment?: Enrolment }>
-  refreshEnrolment: () => Promise<void>
   signInWithGoogle: (details?: {
     credential?: string
     access_token?: string
@@ -250,12 +241,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const register = async (name: string, email: string, password: string, phone?: string, company?: string, utrNumber?: string) => {
+  const register = async (name: string, email: string, password: string, phone?: string, company?: string) => {
     try {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, password, phone, company, plan: 'bootcamp_full', utrNumber }),
+        body: JSON.stringify({ name, email, password, phone, company, plan: 'bootcamp_full' }),
       })
       const text = await res.text()
       let data: ApiResponse = {}
@@ -321,56 +312,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       return { ok: false, error: 'Connection error. Please try again.' }
     }
-  }
-
-  const resubmitUtr = async (utrNumber: string, enrolmentId?: string): Promise<{ ok: boolean; error?: string; enrolment?: Enrolment }> => {
-    try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-      if (token) headers['Authorization'] = `Bearer ${token}`
-
-      const res = await fetch('/api/enrol/resubmit-utr', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ utrNumber, enrolmentId: enrolmentId || enrolment?.id }),
-      })
-      const text = await res.text()
-      let resData: ApiResponse = {}
-      try {
-        resData = JSON.parse(text) as ApiResponse
-      } catch {
-        return { ok: false, error: `Server error (${res.status})` }
-      }
-
-      if (!res.ok || !resData.ok || !resData.enrolment) {
-        return { ok: false, error: resData.error || 'Failed to resubmit payment details.' }
-      }
-
-      setEnrolment(resData.enrolment)
-      localStorage.setItem(ENROLMENT_KEY, JSON.stringify(resData.enrolment))
-      return { ok: true, enrolment: resData.enrolment }
-    } catch {
-      return { ok: false, error: 'Connection error. Please try again.' }
-    }
-  }
-
-  const refreshEnrolment = async () => {
-    if (!token) return
-    try {
-      const res = await fetch('/api/auth/me', {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (res.ok) {
-        const data = (await res.json()) as { enrolment?: Enrolment; user?: User }
-        if (data.enrolment) {
-          setEnrolment(data.enrolment)
-          localStorage.setItem(ENROLMENT_KEY, JSON.stringify(data.enrolment))
-        }
-        if (data.user) {
-          setUser(data.user)
-          localStorage.setItem(USER_KEY, JSON.stringify(data.user))
-        }
-      }
-    } catch {}
   }
 
   const signInWithGoogle = async (details?: {
@@ -471,8 +412,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         register,
         enrolStudent,
-        resubmitUtr,
-        refreshEnrolment,
         signInWithGoogle,
         logout,
       }}
