@@ -40,7 +40,6 @@ export function StudentDashboardModal() {
   const [activeView, setActiveView] = useState<ActiveView>('overview')
   const [isCopied, setIsCopied] = useState(false)
   const [cloneCopied, setCloneCopied] = useState(false)
-  const [copiedUpi, setCopiedUpi] = useState(false)
   const [micActive, setMicActive] = useState(true)
   const [cameraActive, setCameraActive] = useState(true)
   const [recordingPlaying, setRecordingPlaying] = useState(false)
@@ -80,12 +79,6 @@ export function StudentDashboardModal() {
     setIsRefreshing(false)
     setRefreshNotice('Status refreshed just now.')
     setTimeout(() => setRefreshNotice(''), 3000)
-  }
-
-  const handleCopyUpi = () => {
-    navigator.clipboard?.writeText('7488659839@upi')
-    setCopiedUpi(true)
-    setTimeout(() => setCopiedUpi(false), 2500)
   }
 
   const handleResubmitPaymentRef = async (e: React.FormEvent) => {
@@ -335,7 +328,7 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
                       {/* Payment Support Helper */}
                       <div className="mt-4 pt-3 border-t border-rose-500/20 flex flex-wrap items-center justify-between gap-3 text-[12px]">
                         <span className="text-muted">
-                          Official UPI: <strong className="font-mono text-fg">7488659839@upi</strong>
+                          Need priority assistance with payment?
                         </span>
                         <a
                           href={`https://wa.me/917488659839?text=${encodeURIComponent(
@@ -381,18 +374,9 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
                       {/* Payment summary grid */}
                       <div className="mt-4 grid sm:grid-cols-2 gap-2.5 text-[12.5px]">
                         <div className="rounded-[10px] bg-surface border border-line p-3">
-                          <p className="text-muted text-[11px] uppercase font-semibold">Official Payment Beneficiary</p>
-                          <p className="font-semibold text-fg mt-0.5">LearnWithExpert / Anmol Gupta</p>
-                          <div className="mt-1 flex items-center justify-between">
-                            <span className="font-mono text-accent text-[13px]">7488659839@upi</span>
-                            <button
-                              type="button"
-                              onClick={handleCopyUpi}
-                              className="text-[11px] text-muted hover:text-fg underline cursor-pointer"
-                            >
-                              {copiedUpi ? 'Copied!' : 'Copy'}
-                            </button>
-                          </div>
+                          <p className="text-muted text-[11px] uppercase font-semibold">Cohort & Plan</p>
+                          <p className="font-semibold text-fg mt-0.5">{enrolment?.planLabel || 'Bootcamp'}</p>
+                          <p className="text-muted text-[11.5px] mt-1">Amount: <strong className="text-fg">₹{enrolment?.amount?.toLocaleString() || '9,999'}</strong></p>
                         </div>
 
                         <div className="rounded-[10px] bg-surface border border-line p-3">
@@ -400,7 +384,7 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
                           <p className="font-mono text-fg font-semibold mt-0.5 break-all">
                             {enrolment?.paymentReference || 'None provided during signup'}
                           </p>
-                          <p className="text-[11px] text-faint mt-1">Status: Awaiting bank match</p>
+                          <p className="text-[11px] text-faint mt-1">Status: Awaiting admin approval</p>
                         </div>
                       </div>
 

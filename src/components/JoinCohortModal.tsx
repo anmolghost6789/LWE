@@ -4,9 +4,7 @@ import {
   ArrowRight,
   Building2,
   Calendar,
-  Check,
   CheckCircle2,
-  Copy,
   CreditCard,
   Lock,
   Mail,
@@ -58,7 +56,6 @@ export function JoinCohortModal() {
   const [workflowGoal, setWorkflowGoal] = useState('')
   const [plan, setPlan] = useState<'bootcamp_full' | 'bootcamp_instalment' | 'recordings' | 'team'>(selectedPlan || 'bootcamp_full')
   const [paymentReference, setPaymentReference] = useState('')
-  const [copiedUpi, setCopiedUpi] = useState(false)
   const [agreed, setAgreed] = useState(true)
 
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -67,12 +64,6 @@ export function JoinCohortModal() {
   const [enrolmentId, setEnrolmentId] = useState('')
 
   if (!isJoinCohortOpen) return null
-
-  const handleCopyUpi = () => {
-    navigator.clipboard?.writeText('7488659839@upi')
-    setCopiedUpi(true)
-    setTimeout(() => setCopiedUpi(false), 2500)
-  }
 
   const validate = () => {
     const errs: Record<string, string> = {}
@@ -368,34 +359,18 @@ export function JoinCohortModal() {
                   </div>
                 </div>
 
-                {/* UPI Payment & Verification Box */}
+                {/* Payment Verification & UTR Submission Box */}
                 <div className="rounded-[12px] bg-surface-2/80 border border-accent/25 p-4 text-left">
-                  <div className="flex items-center justify-between mb-2.5">
+                  <div className="flex items-center justify-between mb-2">
                     <span className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-accent">
-                      <CreditCard className="size-4" /> UPI Payment & Verification
+                      <CreditCard className="size-4" /> Payment Verification
                     </span>
                     <span className="text-[12px] text-muted">Amount: <strong className="text-fg">{selectedPlanDetails.price}</strong></span>
                   </div>
 
                   <p className="text-[12.5px] text-muted leading-relaxed">
-                    Pay course fee using any UPI app (Google Pay, PhonePe, Paytm, BHIM) or netbanking directly to:
+                    Enter your Transaction ID or UTR Number below to unlock your student dashboard & live session room.
                   </p>
-
-                  <div className="mt-2.5 flex items-center justify-between rounded-[10px] bg-surface border border-line px-3.5 py-2.5">
-                    <div>
-                      <p className="text-[10px] text-muted uppercase tracking-wider font-semibold">Official UPI ID</p>
-                      <p className="text-[14.5px] font-mono font-bold text-fg tracking-wide">7488659839@upi</p>
-                      <p className="text-[11.5px] text-muted mt-0.5">Beneficiary: <strong className="text-fg/90">LearnWithExpert / Anmol Gupta</strong></p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleCopyUpi}
-                      className="inline-flex items-center gap-1.5 rounded-[8px] bg-white/[0.08] hover:bg-white/[0.14] px-3 py-1.5 text-[12px] font-medium text-fg transition-colors cursor-pointer"
-                    >
-                      {copiedUpi ? <Check className="size-3.5 text-emerald-400" /> : <Copy className="size-3.5 text-muted" />}
-                      {copiedUpi ? 'Copied' : 'Copy UPI'}
-                    </button>
-                  </div>
 
                   {/* Payment Reference Input */}
                   <div className="mt-3">
@@ -414,7 +389,7 @@ export function JoinCohortModal() {
                       <span>Admin verifies this reference to activate your dashboard.</span>
                       <a
                         href={`https://wa.me/917488659839?text=${encodeURIComponent(
-                          'Hi LearnWithExpert team, I need assistance with UPI payment and UTR verification for Cohort 7.'
+                          'Hi LearnWithExpert team, I need assistance with payment and UTR verification for Cohort 7.'
                         )}`}
                         target="_blank"
                         rel="noopener noreferrer"
