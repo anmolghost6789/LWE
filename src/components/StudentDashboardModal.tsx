@@ -274,7 +274,7 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
                         <span className="text-[12px] text-muted">ID: {enrolment?.id || 'ENR-UNKNOWN'}</span>
                       </div>
                       <h4 className="text-[18px] font-semibold text-fg mt-1.5">
-                        Offline Payment Verification Failed
+                        Payment Verification Rejected
                       </h4>
                       <p className="text-[13px] text-muted mt-1 leading-relaxed">
                         The administrator reviewed your registration and was unable to confirm receipt of payment. Your dashboard and live room access remain locked.
@@ -332,14 +332,14 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
                         )}
                       </form>
 
-                      {/* Offline Payment Helper */}
+                      {/* Payment Support Helper */}
                       <div className="mt-4 pt-3 border-t border-rose-500/20 flex flex-wrap items-center justify-between gap-3 text-[12px]">
                         <span className="text-muted">
                           Official UPI: <strong className="font-mono text-fg">7488659839@upi</strong>
                         </span>
                         <a
                           href={`https://wa.me/917488659839?text=${encodeURIComponent(
-                            `Hi, my payment verification failed for Enrolment ID: ${enrolment?.id}. Here is my payment receipt screenshot.`
+                            `Hi, my payment verification was rejected for Enrolment ID: ${enrolment?.id}. Here is my payment receipt screenshot.`
                           )}`}
                           target="_blank"
                           rel="noopener noreferrer"
@@ -375,13 +375,13 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
                         Dashboard Access Locked
                       </h4>
                       <p className="text-[13px] text-muted mt-1 leading-relaxed">
-                        Your registration for <strong className="text-fg">{enrolment?.planLabel || 'Bootcamp'}</strong> (₹{enrolment?.amount?.toLocaleString() || '9,999'}) is awaiting offline payment verification by the administrator. All session materials and live classroom rooms will be unlocked as soon as your payment is approved.
+                        Your registration for <strong className="text-fg">{enrolment?.planLabel || 'Bootcamp'}</strong> (₹{enrolment?.amount?.toLocaleString() || '9,999'}) is awaiting payment verification by the administrator. All session materials and live classroom rooms will be unlocked as soon as your payment is approved.
                       </p>
 
                       {/* Payment summary grid */}
                       <div className="mt-4 grid sm:grid-cols-2 gap-2.5 text-[12.5px]">
                         <div className="rounded-[10px] bg-surface border border-line p-3">
-                          <p className="text-muted text-[11px] uppercase font-semibold">Offline Payment Beneficiary</p>
+                          <p className="text-muted text-[11px] uppercase font-semibold">Official Payment Beneficiary</p>
                           <p className="font-semibold text-fg mt-0.5">LearnWithExpert / Anmol Gupta</p>
                           <div className="mt-1 flex items-center justify-between">
                             <span className="font-mono text-accent text-[13px]">7488659839@upi</span>
@@ -444,7 +444,7 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
 
                         <a
                           href={`https://wa.me/917488659839?text=${encodeURIComponent(
-                            `Hi! I registered for Cohort 7 (ID: ${enrolment?.id || ''}, Email: ${user.email}). I made the offline payment via UPI. Please verify and approve my account.`
+                            `Hi! I registered for Cohort 7 (ID: ${enrolment?.id || ''}, Email: ${user.email}). I made the payment via UPI. Please verify and approve my account.`
                           )}`}
                           target="_blank"
                           rel="noopener noreferrer"

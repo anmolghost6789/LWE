@@ -36,7 +36,7 @@ export function Footer() {
                 {col.links.map((link) => (
                   <li key={link}>
                     <a
-                      href={link === 'Contact' || link === 'For teams' ? '#contact' : '#'}
+                      href={link === 'Contact' || link === 'Contact & Support' || link === 'For teams' ? '#support' : '#'}
                       className="text-[14px] text-muted transition-colors hover:text-fg"
                     >
                       {link}

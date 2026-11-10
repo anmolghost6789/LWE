@@ -547,7 +547,7 @@ export function AdminDashboard() {
                                 <div className="text-[11px] text-muted">{student.planLabel}</div>
                               </td>
 
-                              {/* Offline Payment & UTR */}
+                              {/* Payment & UTR */}
                               <td className="py-3 px-4">
                                 {student.paymentReference ? (
                                   <div>
@@ -569,7 +569,7 @@ export function AdminDashboard() {
                                       </button>
                                     </div>
                                     <div className="text-[11px] text-muted mt-0.5">
-                                      Method: <span className="capitalize">{student.paymentMethod?.replace('offline_', '') || 'offline'}</span>
+                                      Method: <span className="uppercase font-medium">{student.paymentMethod?.replace('offline_', '') || 'UPI'}</span>
                                     </div>
                                   </div>
                                 ) : (

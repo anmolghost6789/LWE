@@ -5,11 +5,12 @@ import {
   Building2,
   Calendar,
   Check,
-  Clock,
+  CheckCircle2,
   Copy,
   CreditCard,
   Lock,
   Mail,
+  MessageCircle,
   Phone,
   ShieldCheck,
   Sparkles,
@@ -119,7 +120,7 @@ export function JoinCohortModal() {
       plan,
       workflowGoal: workflowGoal.trim(),
       paymentReference: paymentReference.trim(),
-      paymentMethod: 'offline_upi',
+      paymentMethod: 'upi',
     })
 
     if (result.ok && result.enrolment) {
@@ -203,31 +204,54 @@ export function JoinCohortModal() {
           {status === 'success' ? (
             <div className="py-6 text-center">
               <div className="mx-auto flex size-16 items-center justify-center rounded-full bg-accent-2/15 text-accent-2 shadow-[0_0_30px_rgba(255,184,0,0.3)]">
-                <Clock className="size-9 animate-pulse" />
+                <CheckCircle2 className="size-9" />
               </div>
               <h3 className="mt-5 text-[24px] font-semibold tracking-tight text-fg">
-                Registration & Offline Payment Received!
+                Payment Details Submitted!
               </h3>
               <p className="mt-2 text-[15px] text-muted max-w-md mx-auto">
-                Thank you, <strong className="text-fg">{name}</strong>. Your registration for{' '}
-                <strong className="text-fg">{selectedPlanDetails.name}</strong> is in queue.
+                Thank you, <strong className="text-fg">{name}</strong>. Your enrolment in{' '}
+                <strong className="text-fg">{selectedPlanDetails.name}</strong> has been received.
               </p>
 
               {/* Status banner */}
               <div className="mt-5 rounded-card-sm bg-accent-2/10 border border-accent-2/30 p-4 max-w-md mx-auto text-left">
                 <div className="flex items-center gap-2 text-accent-2 font-semibold text-[13px]">
                   <span className="size-2 rounded-full bg-accent-2 animate-ping" />
-                  Status: Pending Administrator Verification
+                  Status: Pending Admin Verification
                 </div>
                 <p className="mt-1 text-[12.5px] text-muted leading-relaxed">
-                  Payments are verified manually by the admin. Once your offline payment is verified, full access to the student dashboard and live cohort room will be automatically unlocked.
+                  Your submitted Transaction ID / UTR is being verified by the admin in the backend. Full access to the student dashboard and live session room will be unlocked upon approval.
                 </p>
                 <div className="mt-3 pt-3 border-t border-accent-2/20 flex flex-wrap items-center justify-between gap-2 text-[12px]">
                   <span className="text-muted">Enrolment ID: <strong className="font-mono text-fg">{enrolmentId}</strong></span>
                   {paymentReference && (
-                    <span className="text-muted">Ref: <strong className="font-mono text-accent-2">{paymentReference}</strong></span>
+                    <span className="text-muted">Transaction ID: <strong className="font-mono text-accent-2">{paymentReference}</strong></span>
                   )}
                 </div>
+              </div>
+
+              {/* WhatsApp Quick Verification Link */}
+              <div className="mt-4 p-3 rounded-[12px] bg-emerald-500/10 border border-emerald-500/25 max-w-md mx-auto flex items-center justify-between gap-3 text-left">
+                <div className="flex items-center gap-2.5">
+                  <div className="size-8 rounded-full bg-emerald-500/20 grid place-items-center text-emerald-400 shrink-0">
+                    <MessageCircle className="size-4" />
+                  </div>
+                  <div>
+                    <p className="text-[12.5px] font-semibold text-fg">WhatsApp Support</p>
+                    <p className="text-[11px] text-muted">Send screenshot for instant approval</p>
+                  </div>
+                </div>
+                <a
+                  href={`https://wa.me/917488659839?text=${encodeURIComponent(
+                    `Hi, I have submitted my payment for GenAI Bootcamp. Enrolment ID: ${enrolmentId}, Name: ${name}, UTR: ${paymentReference}. Please verify my payment.`
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-[8px] bg-emerald-500 hover:bg-emerald-400 text-bg px-3 py-1.5 text-[11.5px] font-semibold transition-colors cursor-pointer shrink-0"
+                >
+                  Send on WhatsApp
+                </a>
               </div>
 
               <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-center">
@@ -239,7 +263,7 @@ export function JoinCohortModal() {
                   }}
                   className="flex items-center justify-center gap-2 rounded-[12px] bg-fg px-6 py-3.5 text-[14px] font-semibold text-bg hover:bg-white transition-all cursor-pointer shadow-[0_4px_16px_rgba(255,255,255,0.2)]"
                 >
-                  <Sparkles className="size-4" /> Check Account Status
+                  <Sparkles className="size-4" /> Open Student Portal
                 </button>
                 <button
                   type="button"
@@ -344,29 +368,29 @@ export function JoinCohortModal() {
                   </div>
                 </div>
 
-                {/* Offline Payment Box */}
+                {/* UPI Payment & Verification Box */}
                 <div className="rounded-[12px] bg-surface-2/80 border border-accent/25 p-4 text-left">
                   <div className="flex items-center justify-between mb-2.5">
                     <span className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-accent">
-                      <CreditCard className="size-4" /> Offline Payment Instructions
+                      <CreditCard className="size-4" /> UPI Payment & Verification
                     </span>
                     <span className="text-[12px] text-muted">Amount: <strong className="text-fg">{selectedPlanDetails.price}</strong></span>
                   </div>
 
                   <p className="text-[12.5px] text-muted leading-relaxed">
-                    Make payment via UPI or IMPS/NEFT transfer directly to the official account:
+                    Pay course fee using any UPI app (Google Pay, PhonePe, Paytm, BHIM) or netbanking directly to:
                   </p>
 
-                  <div className="mt-2.5 flex items-center justify-between rounded-[10px] bg-surface border border-line px-3 py-2">
+                  <div className="mt-2.5 flex items-center justify-between rounded-[10px] bg-surface border border-line px-3.5 py-2.5">
                     <div>
-                      <p className="text-[10px] text-muted uppercase tracking-wider font-medium">Official UPI ID</p>
-                      <p className="text-[14px] font-mono font-semibold text-fg">7488659839@upi</p>
-                      <p className="text-[11px] text-muted">Beneficiary: LearnWithExpert / Anmol Gupta</p>
+                      <p className="text-[10px] text-muted uppercase tracking-wider font-semibold">Official UPI ID</p>
+                      <p className="text-[14.5px] font-mono font-bold text-fg tracking-wide">7488659839@upi</p>
+                      <p className="text-[11.5px] text-muted mt-0.5">Beneficiary: <strong className="text-fg/90">LearnWithExpert / Anmol Gupta</strong></p>
                     </div>
                     <button
                       type="button"
                       onClick={handleCopyUpi}
-                      className="inline-flex items-center gap-1.5 rounded-[8px] bg-white/[0.08] hover:bg-white/[0.14] px-2.5 py-1.5 text-[12px] font-medium text-fg transition-colors cursor-pointer"
+                      className="inline-flex items-center gap-1.5 rounded-[8px] bg-white/[0.08] hover:bg-white/[0.14] px-3 py-1.5 text-[12px] font-medium text-fg transition-colors cursor-pointer"
                     >
                       {copiedUpi ? <Check className="size-3.5 text-emerald-400" /> : <Copy className="size-3.5 text-muted" />}
                       {copiedUpi ? 'Copied' : 'Copy UPI'}
@@ -376,19 +400,29 @@ export function JoinCohortModal() {
                   {/* Payment Reference Input */}
                   <div className="mt-3">
                     <label htmlFor="enrol-utr" className="block text-[12.5px] font-medium text-fg/90 mb-1">
-                      Payment Reference / UTR Number / Transaction ID:
+                      Transaction ID / UTR Number:
                     </label>
                     <input
                       id="enrol-utr"
                       type="text"
-                      placeholder="e.g. 12-digit UPI UTR (430128912345) or Txn ID (Optional if paying later)"
+                      placeholder="Enter 12-digit UPI UTR or Transaction ID (e.g. 430128912345)"
                       value={paymentReference}
                       onChange={(e) => setPaymentReference(e.target.value)}
-                      className="depth w-full rounded-[10px] bg-surface px-3.5 py-2.5 text-[13px] text-fg placeholder:text-muted/50 border border-line focus:border-accent focus:outline-none"
+                      className="depth w-full rounded-[10px] bg-surface px-3.5 py-2.5 text-[13px] text-fg placeholder:text-muted/50 border border-line focus:border-accent focus:outline-none font-mono"
                     />
-                    <p className="mt-1 text-[11px] text-muted">
-                      Admin will cross-reference this reference to approve your dashboard access.
-                    </p>
+                    <div className="mt-1.5 flex items-center justify-between text-[11px] text-muted">
+                      <span>Admin verifies this reference to activate your dashboard.</span>
+                      <a
+                        href={`https://wa.me/917488659839?text=${encodeURIComponent(
+                          'Hi LearnWithExpert team, I need assistance with UPI payment and UTR verification for Cohort 7.'
+                        )}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-emerald-400 hover:underline inline-flex items-center gap-1"
+                      >
+                        <MessageCircle className="size-3" /> WhatsApp Support
+                      </a>
+                    </div>
                   </div>
                 </div>
 
@@ -571,7 +605,7 @@ export function JoinCohortModal() {
                     </span>
                   ) : (
                     <>
-                      <span>Submit Registration & Offline Payment Details</span>
+                      <span>Confirm Enrolment & Submit Details</span>
                       <ArrowRight className="size-4" />
                     </>
                   )}

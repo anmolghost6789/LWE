@@ -396,7 +396,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {}
   }
 
-  const resubmitPaymentReference = async (paymentReference: string, paymentMethod = 'offline') => {
+  const resubmitPaymentReference = async (paymentReference: string, paymentMethod = 'upi') => {
     if (!token && !enrolment) return { ok: false, error: 'Authentication required' }
     try {
       const res = await fetch('/api/enrol/resubmit-payment', {

@@ -12,6 +12,7 @@ import { LogoCloud } from './sections/LogoCloud'
 import { Metrics } from './sections/Metrics'
 import { Nav } from './sections/Nav'
 import { Pricing } from './sections/Pricing'
+import { CustomerSupport } from './sections/CustomerSupport'
 import { Showcase } from './sections/Showcase'
 import { Steps } from './sections/Steps'
 import { Testimonials } from './sections/Testimonials'
@@ -33,6 +34,7 @@ function AppContent() {
         <Metrics />
         <Testimonials />
         <Pricing onOpenAuth={openAuthModal} />
+        <CustomerSupport />
         <Faq />
         <Cta />
       </main>

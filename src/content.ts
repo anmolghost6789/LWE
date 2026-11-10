@@ -13,6 +13,7 @@ export const nav = {
     { label: 'How it works', href: '#how' },
     { label: 'Results', href: '#customers' },
     { label: 'Pricing', href: '#pricing' },
+    { label: 'Support', href: '#support' },
   ],
   signIn: { label: 'Sign in', href: '#' },
   cta: { label: 'Register', href: '#' },
