@@ -34,8 +34,13 @@ export interface Enrolment {
   plan: 'bootcamp_full' | 'bootcamp_instalment' | 'recordings' | 'team'
   planLabel: string
   amount: number
-  status: 'confirmed' | 'pending' | 'waitlist'
+  status: 'approved' | 'pending' | 'rejected' | 'confirmed' | 'waitlist'
   workflowGoal: string
+  paymentMethod?: string
+  paymentReference?: string
+  rejectionReason?: string
+  verifiedAt?: string
+  verifiedBy?: string
   enrolledAt: string
 }
 
@@ -132,11 +137,25 @@ async function ensureNeonTables(): Promise<boolean> {
         plan VARCHAR(50) NOT NULL,
         plan_label VARCHAR(100) NOT NULL,
         amount INTEGER NOT NULL,
-        status VARCHAR(20) DEFAULT 'confirmed',
+        status VARCHAR(20) DEFAULT 'pending',
         workflow_goal TEXT,
+        payment_method VARCHAR(50) DEFAULT 'offline',
+        payment_reference VARCHAR(255),
+        rejection_reason TEXT,
+        verified_at TIMESTAMPTZ,
+        verified_by VARCHAR(100),
         enrolled_at TIMESTAMPTZ DEFAULT NOW()
       );
     `
+
+    // Safe migration: add offline payment & approval verification columns if missing
+    try {
+      await sql`ALTER TABLE enrolments ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'offline';`
+      await sql`ALTER TABLE enrolments ADD COLUMN IF NOT EXISTS payment_reference VARCHAR(255);`
+      await sql`ALTER TABLE enrolments ADD COLUMN IF NOT EXISTS rejection_reason TEXT;`
+      await sql`ALTER TABLE enrolments ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;`
+      await sql`ALTER TABLE enrolments ADD COLUMN IF NOT EXISTS verified_by VARCHAR(100);`
+    } catch {}
 
     // 4. Ensure master admin user exists in Neon
     await sql`
@@ -288,8 +307,13 @@ function formatEnrolment(e: any): Enrolment {
     plan: e.plan,
     planLabel: e.planLabel || e.plan_label,
     amount: Number(e.amount),
-    status: e.status,
+    status: e.status || 'pending',
     workflowGoal: e.workflowGoal || e.workflow_goal,
+    paymentMethod: e.paymentMethod || e.payment_method || 'offline',
+    paymentReference: e.paymentReference || e.payment_reference || '',
+    rejectionReason: e.rejectionReason || e.rejection_reason || undefined,
+    verifiedAt: e.verifiedAt || e.verified_at || undefined,
+    verifiedBy: e.verifiedBy || e.verified_by || undefined,
     enrolledAt: e.enrolledAt || e.enrolled_at,
   }
 }
@@ -456,6 +480,8 @@ export default async function handler(req: any, res?: any) {
       role?: string
       workflowGoal?: string
       plan?: string
+      paymentReference?: string
+      paymentMethod?: string
     }>(req)
 
     const name = body.name?.trim() ?? ''
@@ -466,6 +492,8 @@ export default async function handler(req: any, res?: any) {
     const studentRole = body.role?.trim() || 'Software Developer'
     const workflowGoal = body.workflowGoal?.trim() || 'Custom GenAI Workflow'
     const planKey = (body.plan && PLAN_PRICES[body.plan]) ? body.plan : 'bootcamp_full'
+    const paymentReference = body.paymentReference?.trim() || ''
+    const paymentMethod = body.paymentMethod?.trim() || 'offline'
 
     if (!name || name.length < 2) return sendJson(res, 400, { error: 'Please enter your full name (minimum 2 characters).' })
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return sendJson(res, 400, { error: 'Please enter a valid email address.' })
@@ -477,6 +505,8 @@ export default async function handler(req: any, res?: any) {
     const enrolmentId = `ENR-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`
     const token = generateToken()
     const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000
+    // Paid plans start in pending status awaiting admin manual verification
+    const initialStatus = planDetails.amount > 0 ? 'pending' : 'approved'
 
     if (isNeonReady) {
       // Check existing in Neon
@@ -491,10 +521,10 @@ export default async function handler(req: any, res?: any) {
         VALUES (${userId}, ${name}, ${email}, ${phone}, ${company || studentRole}, ${passwordHash}, 'student', 'Cohort 7 (Starts 17 Nov)', NOW())
       `
 
-      // Insert Enrolment
+      // Insert Enrolment with offline payment details
       await sql`
-        INSERT INTO enrolments (id, user_id, name, email, phone, country_code, company, cohort, plan, plan_label, amount, status, workflow_goal, enrolled_at)
-        VALUES (${enrolmentId}, ${userId}, ${name}, ${email}, ${phone || 'Not specified'}, '+91', ${company || 'Independent Builder'}, 'Cohort 7 (Starts 17 Nov)', ${planKey}, ${planDetails.label}, ${planDetails.amount}, 'confirmed', ${workflowGoal}, NOW())
+        INSERT INTO enrolments (id, user_id, name, email, phone, country_code, company, cohort, plan, plan_label, amount, status, workflow_goal, payment_method, payment_reference, enrolled_at)
+        VALUES (${enrolmentId}, ${userId}, ${name}, ${email}, ${phone || 'Not specified'}, '+91', ${company || 'Independent Builder'}, 'Cohort 7 (Starts 17 Nov)', ${planKey}, ${planDetails.label}, ${planDetails.amount}, ${initialStatus}, ${workflowGoal}, ${paymentMethod}, ${paymentReference}, NOW())
       `
 
       // Insert Session
@@ -505,7 +535,9 @@ export default async function handler(req: any, res?: any) {
 
       return sendJson(res, 200, {
         ok: true,
-        message: 'Account created and successfully enrolled in Cohort 7!',
+        message: initialStatus === 'approved' 
+          ? 'Account created and enrolled!' 
+          : 'Registration received! Offline payment is pending admin approval.',
         user: { id: userId, name, email, phone, company: company || studentRole, role: 'student', cohort: 'Cohort 7 (Starts 17 Nov)' },
         enrolment: {
           id: enrolmentId,
@@ -519,8 +551,10 @@ export default async function handler(req: any, res?: any) {
           plan: planKey,
           planLabel: planDetails.label,
           amount: planDetails.amount,
-          status: 'confirmed',
+          status: initialStatus,
           workflowGoal,
+          paymentMethod,
+          paymentReference,
           enrolledAt: new Date().toISOString(),
         },
         token,
@@ -558,8 +592,10 @@ export default async function handler(req: any, res?: any) {
       plan: planKey as any,
       planLabel: planDetails.label,
       amount: planDetails.amount,
-      status: 'confirmed',
+      status: initialStatus,
       workflowGoal,
+      paymentMethod,
+      paymentReference,
       enrolledAt: new Date().toISOString(),
     }
     fallback.enrolments.unshift(newEnrolment)
@@ -568,7 +604,9 @@ export default async function handler(req: any, res?: any) {
 
     return sendJson(res, 200, {
       ok: true,
-      message: 'Account created and successfully enrolled in Cohort 7!',
+      message: initialStatus === 'approved' 
+        ? 'Account created and enrolled!' 
+        : 'Registration received! Offline payment is pending admin approval.',
       user: sanitizeUser(newUser),
       enrolment: newEnrolment,
       token,
@@ -783,9 +821,10 @@ export default async function handler(req: any, res?: any) {
       if (!enrolment && user.role !== 'admin') {
         const planDetails = PLAN_PRICES[planKey]
         const enrolmentId = `ENR-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`
+        const initialStatus = planDetails.amount > 0 ? 'pending' : 'approved'
         await sql`
-          INSERT INTO enrolments (id, user_id, name, email, phone, country_code, company, cohort, plan, plan_label, amount, status, workflow_goal, enrolled_at)
-          VALUES (${enrolmentId}, ${user.id}, ${user.name}, ${user.email}, ${user.phone || 'Not specified'}, '+91', ${user.company || 'Independent Builder'}, 'Cohort 7 (Starts 17 Nov)', ${planKey}, ${planDetails.label}, ${planDetails.amount}, 'confirmed', ${workflowGoal}, NOW())
+          INSERT INTO enrolments (id, user_id, name, email, phone, country_code, company, cohort, plan, plan_label, amount, status, workflow_goal, payment_method, enrolled_at)
+          VALUES (${enrolmentId}, ${user.id}, ${user.name}, ${user.email}, ${user.phone || 'Not specified'}, '+91', ${user.company || 'Independent Builder'}, 'Cohort 7 (Starts 17 Nov)', ${planKey}, ${planDetails.label}, ${planDetails.amount}, ${initialStatus}, ${workflowGoal}, 'offline', NOW())
         `
         enrolment = {
           id: enrolmentId,
@@ -799,8 +838,9 @@ export default async function handler(req: any, res?: any) {
           plan: planKey as any,
           planLabel: planDetails.label,
           amount: planDetails.amount,
-          status: 'confirmed',
+          status: initialStatus,
           workflowGoal,
+          paymentMethod: 'offline',
           enrolledAt: new Date().toISOString(),
         }
       }
@@ -841,6 +881,7 @@ export default async function handler(req: any, res?: any) {
     let enrolment = fallback.enrolments.find((e) => e.userId === user.id || e.email.toLowerCase() === email) || null
     if (!enrolment && user.role !== 'admin') {
       const planDetails = PLAN_PRICES[planKey]
+      const initialStatus = planDetails.amount > 0 ? 'pending' : 'approved'
       enrolment = {
         id: `ENR-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`,
         userId: user.id,
@@ -853,8 +894,9 @@ export default async function handler(req: any, res?: any) {
         plan: planKey as any,
         planLabel: planDetails.label,
         amount: planDetails.amount,
-        status: 'confirmed',
+        status: initialStatus,
         workflowGoal,
+        paymentMethod: 'offline',
         enrolledAt: new Date().toISOString(),
       }
       fallback.enrolments.unshift(enrolment)
@@ -889,6 +931,8 @@ export default async function handler(req: any, res?: any) {
       password?: string
       plan?: string
       workflowGoal?: string
+      paymentReference?: string
+      paymentMethod?: string
     }>(req)
 
     const name = body.name?.trim() ?? ''
@@ -900,6 +944,9 @@ export default async function handler(req: any, res?: any) {
     const planKey = (body.plan && PLAN_PRICES[body.plan]) ? body.plan : 'bootcamp_full'
     const planDetails = PLAN_PRICES[planKey]
     const workflowGoal = body.workflowGoal?.trim() || 'Custom GenAI Workflow Development'
+    const paymentReference = body.paymentReference?.trim() || ''
+    const paymentMethod = body.paymentMethod?.trim() || 'offline'
+    const initialStatus = planDetails.amount > 0 ? 'pending' : 'approved'
     const enrolmentId = `ENR-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`
     const token = generateToken()
     const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000
@@ -932,8 +979,8 @@ export default async function handler(req: any, res?: any) {
 
       // Create enrolment
       await sql`
-        INSERT INTO enrolments (id, user_id, name, email, phone, country_code, company, cohort, plan, plan_label, amount, status, workflow_goal, enrolled_at)
-        VALUES (${enrolmentId}, ${userId}, ${name}, ${email}, ${phone || 'Not specified'}, ${countryCode}, ${company}, 'Cohort 7 (Starts 17 Nov)', ${planKey}, ${planDetails.label}, ${planDetails.amount}, 'confirmed', ${workflowGoal}, NOW())
+        INSERT INTO enrolments (id, user_id, name, email, phone, country_code, company, cohort, plan, plan_label, amount, status, workflow_goal, payment_method, payment_reference, enrolled_at)
+        VALUES (${enrolmentId}, ${userId}, ${name}, ${email}, ${phone || 'Not specified'}, ${countryCode}, ${company}, 'Cohort 7 (Starts 17 Nov)', ${planKey}, ${planDetails.label}, ${planDetails.amount}, ${initialStatus}, ${workflowGoal}, ${paymentMethod}, ${paymentReference}, NOW())
       `
 
       const enrolmentObj = {
@@ -948,14 +995,18 @@ export default async function handler(req: any, res?: any) {
         plan: planKey,
         planLabel: planDetails.label,
         amount: planDetails.amount,
-        status: 'confirmed',
+        status: initialStatus,
         workflowGoal,
+        paymentMethod,
+        paymentReference,
         enrolledAt: new Date().toISOString(),
       }
 
       return sendJson(res, 200, {
         ok: true,
-        message: 'Enrolment confirmed successfully!',
+        message: initialStatus === 'approved' 
+          ? 'Enrolment confirmed successfully!' 
+          : 'Registration received! Offline payment is awaiting admin approval.',
         enrolment: enrolmentObj,
         user: sanitizeUser(user),
         token,
@@ -994,8 +1045,10 @@ export default async function handler(req: any, res?: any) {
       plan: planKey as any,
       planLabel: planDetails.label,
       amount: planDetails.amount,
-      status: 'confirmed',
+      status: initialStatus,
       workflowGoal,
+      paymentMethod,
+      paymentReference,
       enrolledAt: new Date().toISOString(),
     }
 
@@ -1005,7 +1058,9 @@ export default async function handler(req: any, res?: any) {
 
     return sendJson(res, 200, {
       ok: true,
-      message: 'Enrolment confirmed successfully!',
+      message: initialStatus === 'approved' 
+        ? 'Enrolment confirmed successfully!' 
+        : 'Registration received! Offline payment is awaiting admin approval.',
       enrolment: newEnrolment,
       user: sanitizeUser(user),
       token,
@@ -1034,17 +1089,26 @@ export default async function handler(req: any, res?: any) {
 
       const rows = await sql`SELECT * FROM enrolments ORDER BY enrolled_at DESC`
       const enrolments = rows.map(formatEnrolment)
-      const confirmedCount = enrolments.filter((e) => e.status === 'confirmed').length
-      const totalRevenue = enrolments.filter((e) => e.status === 'confirmed').reduce((sum, e) => sum + (e.amount || 0), 0)
+      const approvedCount = enrolments.filter((e) => e.status === 'confirmed' || e.status === 'approved').length
+      const pendingCount = enrolments.filter((e) => e.status === 'pending').length
+      const rejectedCount = enrolments.filter((e) => e.status === 'rejected').length
+      const totalRevenue = enrolments
+        .filter((e) => e.status === 'confirmed' || e.status === 'approved')
+        .reduce((sum, e) => sum + (e.amount || 0), 0)
 
       return sendJson(res, 200, {
+        ok: true,
         enrolments,
         total: enrolments.length,
         stats: {
           totalEnrolments: enrolments.length,
-          confirmed: confirmedCount,
-          pending: enrolments.filter((e) => e.status === 'pending').length,
-          waitlist: enrolments.filter((e) => e.status === 'waitlist').length,
+          totalEnrolled: enrolments.length,
+          confirmedCount: approvedCount,
+          approvedCount,
+          pendingCount,
+          rejectedCount,
+          seatsRemaining: Math.max(0, 6 - approvedCount),
+          maxCohortSeats: 6,
           totalRevenue,
         },
       })
@@ -1058,17 +1122,26 @@ export default async function handler(req: any, res?: any) {
     if (!admin) return sendJson(res, 403, { error: 'Admin access required.' })
 
     const enrolments = fallback.enrolments
-    const confirmedCount = enrolments.filter((e) => e.status === 'confirmed').length
-    const totalRevenue = enrolments.filter((e) => e.status === 'confirmed').reduce((sum, e) => sum + (e.amount || 0), 0)
+    const approvedCount = enrolments.filter((e) => e.status === 'confirmed' || e.status === 'approved').length
+    const pendingCount = enrolments.filter((e) => e.status === 'pending').length
+    const rejectedCount = enrolments.filter((e) => e.status === 'rejected').length
+    const totalRevenue = enrolments
+      .filter((e) => e.status === 'confirmed' || e.status === 'approved')
+      .reduce((sum, e) => sum + (e.amount || 0), 0)
 
     return sendJson(res, 200, {
+      ok: true,
       enrolments,
       total: enrolments.length,
       stats: {
         totalEnrolments: enrolments.length,
-        confirmed: confirmedCount,
-        pending: enrolments.filter((e) => e.status === 'pending').length,
-        waitlist: enrolments.filter((e) => e.status === 'waitlist').length,
+        totalEnrolled: enrolments.length,
+        confirmedCount: approvedCount,
+        approvedCount,
+        pendingCount,
+        rejectedCount,
+        seatsRemaining: Math.max(0, 6 - approvedCount),
+        maxCohortSeats: 6,
         totalRevenue,
       },
     })
@@ -1084,7 +1157,7 @@ export default async function handler(req: any, res?: any) {
 
     if (isNeonReady) {
       const userRows = await sql`
-        SELECT u.role 
+        SELECT u.role, u.email 
         FROM users u 
         JOIN sessions s ON u.id = s.user_id 
         WHERE s.token = ${token} AND s.expires_at > ${Date.now()}
@@ -1093,11 +1166,29 @@ export default async function handler(req: any, res?: any) {
       if (userRows.length === 0 || userRows[0].role !== 'admin') {
         return sendJson(res, 403, { error: 'Admin access required.' })
       }
+      const adminEmail = userRows[0].email
 
       if (req.method === 'PATCH') {
-        const body = await parseBody<{ status?: 'confirmed' | 'pending' | 'waitlist' }>(req)
-        if (body.status && ['confirmed', 'pending', 'waitlist'].includes(body.status)) {
-          const updated = await sql`UPDATE enrolments SET status = ${body.status} WHERE id = ${id} RETURNING *`
+        const body = await parseBody<{
+          status?: 'approved' | 'rejected' | 'pending' | 'confirmed' | 'waitlist'
+          rejectionReason?: string
+        }>(req)
+
+        const validStatuses = ['approved', 'rejected', 'pending', 'confirmed', 'waitlist']
+        if (body.status && validStatuses.includes(body.status)) {
+          const rejectionReason = body.status === 'rejected' ? (body.rejectionReason || 'Offline payment could not be verified.') : null
+          const verifiedAt = body.status === 'approved' || body.status === 'rejected' ? new Date().toISOString() : null
+          const verifiedBy = body.status === 'approved' || body.status === 'rejected' ? adminEmail : null
+
+          const updated = await sql`
+            UPDATE enrolments 
+            SET status = ${body.status}, 
+                rejection_reason = ${rejectionReason},
+                verified_at = ${verifiedAt},
+                verified_by = ${verifiedBy}
+            WHERE id = ${id} 
+            RETURNING *
+          `
           if (updated.length === 0) return sendJson(res, 404, { error: 'Enrolment not found.' })
           return sendJson(res, 200, { ok: true, enrolment: formatEnrolment(updated[0]) })
         }
@@ -1122,9 +1213,17 @@ export default async function handler(req: any, res?: any) {
     if (index === -1) return sendJson(res, 404, { error: 'Enrolment not found.' })
 
     if (req.method === 'PATCH') {
-      const body = await parseBody<{ status?: 'confirmed' | 'pending' | 'waitlist' }>(req)
-      if (body.status && ['confirmed', 'pending', 'waitlist'].includes(body.status)) {
+      const body = await parseBody<{
+        status?: 'approved' | 'rejected' | 'pending' | 'confirmed' | 'waitlist'
+        rejectionReason?: string
+      }>(req)
+
+      const validStatuses = ['approved', 'rejected', 'pending', 'confirmed', 'waitlist']
+      if (body.status && validStatuses.includes(body.status)) {
         fallback.enrolments[index].status = body.status
+        fallback.enrolments[index].rejectionReason = body.status === 'rejected' ? (body.rejectionReason || 'Offline payment could not be verified.') : undefined
+        fallback.enrolments[index].verifiedAt = body.status === 'approved' || body.status === 'rejected' ? new Date().toISOString() : undefined
+        fallback.enrolments[index].verifiedBy = body.status === 'approved' || body.status === 'rejected' ? admin.email : undefined
         await saveFallbackDatabase(fallback)
         return sendJson(res, 200, { ok: true, enrolment: fallback.enrolments[index] })
       }
@@ -1138,6 +1237,142 @@ export default async function handler(req: any, res?: any) {
     }
 
     return sendJson(res, 405, { error: 'Method not allowed' })
+  }
+
+  // -------------------------------------------------------------------------
+  // 10. Resubmit Offline Payment Details: POST /api/enrol/resubmit-payment
+  // -------------------------------------------------------------------------
+  if (pathname === '/api/enrol/resubmit-payment') {
+    if (req.method !== 'POST') return sendJson(res, 405, { error: 'Method not allowed' })
+    const token = getBearerToken(req)
+    const body = await parseBody<{
+      enrolmentId?: string
+      paymentReference?: string
+      paymentMethod?: string
+    }>(req)
+
+    const paymentReference = body.paymentReference?.trim() ?? ''
+    if (!paymentReference) {
+      return sendJson(res, 400, { error: 'Please enter a valid payment reference or transaction ID.' })
+    }
+
+    if (isNeonReady) {
+      let enrolment: any = null
+      if (token) {
+        const sRows = await sql`SELECT user_id FROM sessions WHERE token = ${token} LIMIT 1`
+        if (sRows.length > 0) {
+          const eRows = await sql`SELECT * FROM enrolments WHERE user_id = ${sRows[0].user_id} ORDER BY enrolled_at DESC LIMIT 1`
+          if (eRows.length > 0) enrolment = eRows[0]
+        }
+      }
+      if (!enrolment && body.enrolmentId) {
+        const eRows = await sql`SELECT * FROM enrolments WHERE id = ${body.enrolmentId} LIMIT 1`
+        if (eRows.length > 0) enrolment = eRows[0]
+      }
+
+      if (!enrolment) {
+        return sendJson(res, 404, { error: 'Enrolment record not found.' })
+      }
+
+      const updated = await sql`
+        UPDATE enrolments 
+        SET payment_reference = ${paymentReference},
+            payment_method = ${body.paymentMethod || 'offline'},
+            status = 'pending',
+            rejection_reason = NULL,
+            verified_at = NULL,
+            verified_by = NULL
+        WHERE id = ${enrolment.id}
+        RETURNING *
+      `
+      return sendJson(res, 200, {
+        ok: true,
+        message: 'Payment reference updated. Status changed to pending admin verification.',
+        enrolment: formatEnrolment(updated[0]),
+      })
+    }
+
+    // Fallback store
+    const fallback = await getFallbackDatabase()
+    let enrolmentIndex = -1
+    if (token && fallback.sessions[token]) {
+      const uId = fallback.sessions[token].userId
+      enrolmentIndex = fallback.enrolments.findIndex((e) => e.userId === uId)
+    }
+    if (enrolmentIndex === -1 && body.enrolmentId) {
+      enrolmentIndex = fallback.enrolments.findIndex((e) => e.id === body.enrolmentId)
+    }
+
+    if (enrolmentIndex === -1) {
+      return sendJson(res, 404, { error: 'Enrolment record not found.' })
+    }
+
+    fallback.enrolments[enrolmentIndex].paymentReference = paymentReference
+    fallback.enrolments[enrolmentIndex].paymentMethod = body.paymentMethod || 'offline'
+    fallback.enrolments[enrolmentIndex].status = 'pending'
+    fallback.enrolments[enrolmentIndex].rejectionReason = undefined
+    fallback.enrolments[enrolmentIndex].verifiedAt = undefined
+    fallback.enrolments[enrolmentIndex].verifiedBy = undefined
+    await saveFallbackDatabase(fallback)
+
+    return sendJson(res, 200, {
+      ok: true,
+      message: 'Payment reference updated. Status changed to pending admin verification.',
+      enrolment: fallback.enrolments[enrolmentIndex],
+    })
+  }
+
+  // -------------------------------------------------------------------------
+  // 11. Protected Session Access: GET /api/student/session-access
+  // -------------------------------------------------------------------------
+  if (pathname === '/api/student/session-access') {
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'Method not allowed' })
+    const token = getBearerToken(req)
+    if (!token) return sendJson(res, 401, { error: 'Authentication required.' })
+
+    let isApproved = false
+    let userRole = 'student'
+
+    if (isNeonReady) {
+      const rows = await sql`
+        SELECT u.role, e.status
+        FROM users u
+        JOIN sessions s ON u.id = s.user_id
+        LEFT JOIN enrolments e ON u.id = e.user_id
+        WHERE s.token = ${token} AND s.expires_at > ${Date.now()}
+        LIMIT 1
+      `
+      if (rows.length === 0) return sendJson(res, 401, { error: 'Invalid or expired session.' })
+      userRole = rows[0].role
+      isApproved = userRole === 'admin' || rows[0].status === 'approved' || rows[0].status === 'confirmed'
+    } else {
+      const fallback = await getFallbackDatabase()
+      const session = fallback.sessions[token]
+      if (!session || session.expiresAt < Date.now()) return sendJson(res, 401, { error: 'Invalid or expired session.' })
+      const u = Object.values(fallback.users).find((x) => x.id === session.userId)
+      if (!u) return sendJson(res, 401, { error: 'User not found.' })
+      userRole = u.role
+      const e = fallback.enrolments.find((x) => x.userId === u.id)
+      isApproved = userRole === 'admin' || e?.status === 'approved' || e?.status === 'confirmed'
+    }
+
+    if (!isApproved) {
+      return sendJson(res, 403, {
+        ok: false,
+        accessGranted: false,
+        error: 'Access locked: Your account is pending offline payment approval by an administrator.',
+      })
+    }
+
+    return sendJson(res, 200, {
+      ok: true,
+      accessGranted: true,
+      liveMeetingUrl: 'https://meet.google.com/new',
+      classroomTitle: 'Cohort 7: Live Kickoff & Architecture Session',
+      calendarEventUrl: 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=LWE%20Cohort%207%3A%20Live%20Kickoff%20%26%20Architecture%20Session&dates=20261117T133000Z/20261117T150000Z',
+      repoCloneCmd: 'git clone https://github.com/learnwithexpert/genai-workflow-scaffold.git',
+      slackInviteUrl: 'https://slack.com',
+    })
   }
 
   // -------------------------------------------------------------------------

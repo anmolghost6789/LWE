@@ -4,7 +4,10 @@ import {
   ArrowRight,
   Building2,
   Calendar,
-  CheckCircle2,
+  Check,
+  Clock,
+  Copy,
+  CreditCard,
   Lock,
   Mail,
   Phone,
@@ -53,6 +56,8 @@ export function JoinCohortModal() {
   const [password, setPassword] = useState('')
   const [workflowGoal, setWorkflowGoal] = useState('')
   const [plan, setPlan] = useState<'bootcamp_full' | 'bootcamp_instalment' | 'recordings' | 'team'>(selectedPlan || 'bootcamp_full')
+  const [paymentReference, setPaymentReference] = useState('')
+  const [copiedUpi, setCopiedUpi] = useState(false)
   const [agreed, setAgreed] = useState(true)
 
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -61,6 +66,12 @@ export function JoinCohortModal() {
   const [enrolmentId, setEnrolmentId] = useState('')
 
   if (!isJoinCohortOpen) return null
+
+  const handleCopyUpi = () => {
+    navigator.clipboard?.writeText('7488659839@upi')
+    setCopiedUpi(true)
+    setTimeout(() => setCopiedUpi(false), 2500)
+  }
 
   const validate = () => {
     const errs: Record<string, string> = {}
@@ -107,6 +118,8 @@ export function JoinCohortModal() {
       password,
       plan,
       workflowGoal: workflowGoal.trim(),
+      paymentReference: paymentReference.trim(),
+      paymentMethod: 'offline_upi',
     })
 
     if (result.ok && result.enrolment) {
@@ -151,6 +164,8 @@ export function JoinCohortModal() {
     }
   }
 
+  const selectedPlanDetails = plans.find((p) => p.key === plan) || plans[0]
+
   return (
     <AnimatePresence>
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
@@ -187,23 +202,35 @@ export function JoinCohortModal() {
 
           {status === 'success' ? (
             <div className="py-6 text-center">
-              <div className="mx-auto flex size-16 items-center justify-center rounded-full bg-accent/15 text-accent shadow-[0_0_30px_rgba(255,122,69,0.3)]">
-                <CheckCircle2 className="size-9" />
+              <div className="mx-auto flex size-16 items-center justify-center rounded-full bg-accent-2/15 text-accent-2 shadow-[0_0_30px_rgba(255,184,0,0.3)]">
+                <Clock className="size-9 animate-pulse" />
               </div>
               <h3 className="mt-5 text-[24px] font-semibold tracking-tight text-fg">
-                You Are Enrolled in Cohort 7!
+                Registration & Offline Payment Received!
               </h3>
               <p className="mt-2 text-[15px] text-muted max-w-md mx-auto">
-                Welcome aboard, <strong className="text-fg">{name}</strong>. Your seat is confirmed for the GenAI bootcamp starting 17 November.
+                Thank you, <strong className="text-fg">{name}</strong>. Your registration for{' '}
+                <strong className="text-fg">{selectedPlanDetails.name}</strong> is in queue.
               </p>
 
-              <div className="my-6 rounded-card-sm bg-surface-2/80 p-4 border border-line inline-block text-left">
-                <p className="text-[12px] uppercase tracking-wider text-muted font-medium">Official Enrolment ID</p>
-                <p className="text-[19px] font-mono font-semibold text-accent mt-0.5">{enrolmentId}</p>
-                <p className="text-[12px] text-faint mt-1">Confirmation and session calendar sent to {email}</p>
+              {/* Status banner */}
+              <div className="mt-5 rounded-card-sm bg-accent-2/10 border border-accent-2/30 p-4 max-w-md mx-auto text-left">
+                <div className="flex items-center gap-2 text-accent-2 font-semibold text-[13px]">
+                  <span className="size-2 rounded-full bg-accent-2 animate-ping" />
+                  Status: Pending Administrator Verification
+                </div>
+                <p className="mt-1 text-[12.5px] text-muted leading-relaxed">
+                  Payments are verified manually by the admin. Once your offline payment is verified, full access to the student dashboard and live cohort room will be automatically unlocked.
+                </p>
+                <div className="mt-3 pt-3 border-t border-accent-2/20 flex flex-wrap items-center justify-between gap-2 text-[12px]">
+                  <span className="text-muted">Enrolment ID: <strong className="font-mono text-fg">{enrolmentId}</strong></span>
+                  {paymentReference && (
+                    <span className="text-muted">Ref: <strong className="font-mono text-accent-2">{paymentReference}</strong></span>
+                  )}
+                </div>
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-center">
                 <button
                   type="button"
                   onClick={() => {
@@ -212,14 +239,14 @@ export function JoinCohortModal() {
                   }}
                   className="flex items-center justify-center gap-2 rounded-[12px] bg-fg px-6 py-3.5 text-[14px] font-semibold text-bg hover:bg-white transition-all cursor-pointer shadow-[0_4px_16px_rgba(255,255,255,0.2)]"
                 >
-                  <Sparkles className="size-4" /> Open Student Dashboard
+                  <Sparkles className="size-4" /> Check Account Status
                 </button>
                 <button
                   type="button"
                   onClick={closeJoinCohort}
                   className="rounded-[12px] bg-surface-2 px-5 py-3.5 text-[14px] font-medium text-muted hover:text-fg transition-colors cursor-pointer"
                 >
-                  Close & Explore Site
+                  Done & Back to Site
                 </button>
               </div>
             </div>
@@ -314,6 +341,54 @@ export function JoinCohortModal() {
                         </button>
                       )
                     })}
+                  </div>
+                </div>
+
+                {/* Offline Payment Box */}
+                <div className="rounded-[12px] bg-surface-2/80 border border-accent/25 p-4 text-left">
+                  <div className="flex items-center justify-between mb-2.5">
+                    <span className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-accent">
+                      <CreditCard className="size-4" /> Offline Payment Instructions
+                    </span>
+                    <span className="text-[12px] text-muted">Amount: <strong className="text-fg">{selectedPlanDetails.price}</strong></span>
+                  </div>
+
+                  <p className="text-[12.5px] text-muted leading-relaxed">
+                    Make payment via UPI or IMPS/NEFT transfer directly to the official account:
+                  </p>
+
+                  <div className="mt-2.5 flex items-center justify-between rounded-[10px] bg-surface border border-line px-3 py-2">
+                    <div>
+                      <p className="text-[10px] text-muted uppercase tracking-wider font-medium">Official UPI ID</p>
+                      <p className="text-[14px] font-mono font-semibold text-fg">7488659839@upi</p>
+                      <p className="text-[11px] text-muted">Beneficiary: LearnWithExpert / Anmol Gupta</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopyUpi}
+                      className="inline-flex items-center gap-1.5 rounded-[8px] bg-white/[0.08] hover:bg-white/[0.14] px-2.5 py-1.5 text-[12px] font-medium text-fg transition-colors cursor-pointer"
+                    >
+                      {copiedUpi ? <Check className="size-3.5 text-emerald-400" /> : <Copy className="size-3.5 text-muted" />}
+                      {copiedUpi ? 'Copied' : 'Copy UPI'}
+                    </button>
+                  </div>
+
+                  {/* Payment Reference Input */}
+                  <div className="mt-3">
+                    <label htmlFor="enrol-utr" className="block text-[12.5px] font-medium text-fg/90 mb-1">
+                      Payment Reference / UTR Number / Transaction ID:
+                    </label>
+                    <input
+                      id="enrol-utr"
+                      type="text"
+                      placeholder="e.g. 12-digit UPI UTR (430128912345) or Txn ID (Optional if paying later)"
+                      value={paymentReference}
+                      onChange={(e) => setPaymentReference(e.target.value)}
+                      className="depth w-full rounded-[10px] bg-surface px-3.5 py-2.5 text-[13px] text-fg placeholder:text-muted/50 border border-line focus:border-accent focus:outline-none"
+                    />
+                    <p className="mt-1 text-[11px] text-muted">
+                      Admin will cross-reference this reference to approve your dashboard access.
+                    </p>
                   </div>
                 </div>
 
@@ -492,11 +567,11 @@ export function JoinCohortModal() {
                   {status === 'submitting' ? (
                     <span className="flex items-center gap-2">
                       <span className="size-4 animate-spin rounded-full border-2 border-bg border-t-transparent" />
-                      Securing Your Seat...
+                      Submitting Registration...
                     </span>
                   ) : (
                     <>
-                      <span>Confirm Enrolment & Reserve Seat</span>
+                      <span>Submit Registration & Offline Payment Details</span>
                       <ArrowRight className="size-4" />
                     </>
                   )}
@@ -505,7 +580,7 @@ export function JoinCohortModal() {
 
               <div className="mt-5 flex items-center justify-center gap-2 text-center text-[12px] text-muted/80 border-t border-line pt-3">
                 <ShieldCheck className="size-4 text-accent shrink-0" />
-                <span>Zero Risk: Full refund up to session two. Official GST invoice provided.</span>
+                <span>Zero Risk: Manual verification by admin. Full refund up to session two.</span>
               </div>
             </>
           )}

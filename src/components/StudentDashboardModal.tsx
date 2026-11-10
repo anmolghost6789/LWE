@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import {
   ArrowLeft,
   Calendar,
   Check,
+  CheckCircle2,
   Clock,
   Code2,
   Copy,
@@ -11,17 +12,23 @@ import {
   ExternalLink,
   FileText,
   GitBranch,
+  Lock,
   LogOut,
+  MessageCircle,
   Mic,
   Play,
   Radio,
+  RefreshCw,
   Save,
+  Send,
+  ShieldAlert,
   Sparkles,
   Terminal,
   Users,
   Video,
   VideoOff,
   X,
+  XCircle,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { cx } from '../lib/cx'
@@ -29,13 +36,32 @@ import { cx } from '../lib/cx'
 type ActiveView = 'overview' | 'live_room' | 'recording' | 'slack' | 'repo'
 
 export function StudentDashboardModal() {
-  const { user, enrolment, isDashboardOpen, closeDashboard, logout } = useAuth()
+  const { user, enrolment, isDashboardOpen, closeDashboard, logout, refreshAuth, resubmitPaymentReference } = useAuth()
   const [activeView, setActiveView] = useState<ActiveView>('overview')
   const [isCopied, setIsCopied] = useState(false)
   const [cloneCopied, setCloneCopied] = useState(false)
+  const [copiedUpi, setCopiedUpi] = useState(false)
   const [micActive, setMicActive] = useState(true)
   const [cameraActive, setCameraActive] = useState(true)
   const [recordingPlaying, setRecordingPlaying] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [refreshNotice, setRefreshNotice] = useState('')
+  const [newRefInput, setNewRefInput] = useState('')
+  const [isSubmittingRef, setIsSubmittingRef] = useState(false)
+  const [refSubmitMsg, setRefSubmitMsg] = useState('')
+
+  const isApproved = user?.role === 'admin' || enrolment?.status === 'approved' || enrolment?.status === 'confirmed'
+  const isRejected = enrolment?.status === 'rejected'
+
+  // Auto-poll approval status every 20 seconds while user is waiting in pending/rejected state
+  useEffect(() => {
+    if (!isDashboardOpen || isApproved) return
+    const interval = setInterval(() => {
+      refreshAuth()
+    }, 20000)
+    return () => clearInterval(interval)
+  }, [isDashboardOpen, isApproved, refreshAuth])
+
   const [studentRepoUrl, setStudentRepoUrl] = useState(() => {
     try {
       return localStorage.getItem('lwe_student_repo_' + (user?.id || '')) || ''
@@ -46,6 +72,36 @@ export function StudentDashboardModal() {
   const [repoSaved, setRepoSaved] = useState(false)
 
   if (!isDashboardOpen || !user) return null
+
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true)
+    setRefreshNotice('')
+    await refreshAuth()
+    setIsRefreshing(false)
+    setRefreshNotice('Status refreshed just now.')
+    setTimeout(() => setRefreshNotice(''), 3000)
+  }
+
+  const handleCopyUpi = () => {
+    navigator.clipboard?.writeText('7488659839@upi')
+    setCopiedUpi(true)
+    setTimeout(() => setCopiedUpi(false), 2500)
+  }
+
+  const handleResubmitPaymentRef = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newRefInput.trim()) return
+    setIsSubmittingRef(true)
+    setRefSubmitMsg('')
+    const res = await resubmitPaymentReference(newRefInput.trim())
+    setIsSubmittingRef(false)
+    if (res.ok) {
+      setRefSubmitMsg('Payment reference submitted successfully! Status updated to Pending.')
+      setNewRefInput('')
+    } else {
+      setRefSubmitMsg(res.error || 'Failed to submit payment reference.')
+    }
+  }
 
   const scaffoldCloneCmd = 'git clone https://github.com/learnwithexpert/genai-workflow-scaffold.git'
 
@@ -150,25 +206,35 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
           {/* Header Bar */}
           <div className="flex items-start justify-between border-b border-line pb-5">
             <div className="flex items-center gap-3.5">
-              {activeView !== 'overview' && (
+              {isApproved && activeView !== 'overview' && (
                 <button
                   type="button"
                   onClick={() => setActiveView('overview')}
-                  className="mr-1 grid size-8 place-items-center rounded-[8px] bg-white/[0.06] text-fg hover:bg-white/[0.12] transition-colors"
+                  className="mr-1 grid size-8 place-items-center rounded-[8px] bg-white/[0.06] text-fg hover:bg-white/[0.12] transition-colors cursor-pointer"
                   title="Back to Overview"
                 >
                   <ArrowLeft className="size-4" />
                 </button>
               )}
-              <div className="flex size-12 items-center justify-center rounded-full bg-gradient-to-br from-accent to-accent-2 font-semibold text-bg text-[16px] shadow-[0_0_20px_rgba(255,122,69,0.3)]">
+              <div className="flex size-12 items-center justify-center rounded-full bg-gradient-to-br from-accent to-accent-2 font-semibold text-bg text-[16px] shadow-[0_0_20px_rgba(255,122,69,0.3)] shrink-0">
                 {getInitials(user.name)}
               </div>
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <h3 className="text-[19px] font-semibold text-fg tracking-tight">{user.name}</h3>
-                  <span className="rounded-[8px] bg-accent/15 px-2 py-0.5 text-[11px] font-medium text-accent border border-accent/25">
-                    {user.cohort}
-                  </span>
+                  {isApproved ? (
+                    <span className="rounded-[8px] bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-400 border border-emerald-500/25 flex items-center gap-1">
+                      <CheckCircle2 className="size-3" /> Verified Student · Access Approved
+                    </span>
+                  ) : isRejected ? (
+                    <span className="rounded-[8px] bg-rose-500/15 px-2 py-0.5 text-[11px] font-medium text-rose-400 border border-rose-500/25 flex items-center gap-1">
+                      <XCircle className="size-3" /> Access Rejected
+                    </span>
+                  ) : (
+                    <span className="rounded-[8px] bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-400 border border-amber-500/25 flex items-center gap-1">
+                      <Clock className="size-3 animate-spin" /> Pending Admin Approval
+                    </span>
+                  )}
                 </div>
                 <p className="text-[12.5px] text-muted mt-0.5">{user.email} · {user.role}</p>
               </div>
@@ -180,11 +246,225 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
                 setActiveView('overview')
                 closeDashboard()
               }}
-              className="grid size-8 place-items-center rounded-[10px] text-muted hover:bg-white/[0.08] hover:text-fg transition-colors"
+              className="grid size-8 place-items-center rounded-[10px] text-muted hover:bg-white/[0.08] hover:text-fg transition-colors cursor-pointer"
             >
               <X className="size-4" />
             </button>
           </div>
+
+          {/* ACCESS CONTROL GATE: When account is NOT yet approved by admin */}
+          {!isApproved ? (
+            <div className="mt-6">
+              {isRejected ? (
+                /* ----------------- STATE: REJECTED ----------------- */
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rounded-card-sm bg-rose-950/20 border border-rose-500/30 p-5 sm:p-6"
+                >
+                  <div className="flex items-start gap-4">
+                    <div className="size-12 rounded-full bg-rose-500/20 border border-rose-500/30 grid place-items-center text-rose-400 shrink-0">
+                      <ShieldAlert className="size-6" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/20 px-2.5 py-0.5 text-[11px] font-semibold text-rose-300 border border-rose-500/30">
+                          Verification Unsuccessful
+                        </span>
+                        <span className="text-[12px] text-muted">ID: {enrolment?.id || 'ENR-UNKNOWN'}</span>
+                      </div>
+                      <h4 className="text-[18px] font-semibold text-fg mt-1.5">
+                        Offline Payment Verification Failed
+                      </h4>
+                      <p className="text-[13px] text-muted mt-1 leading-relaxed">
+                        The administrator reviewed your registration and was unable to confirm receipt of payment. Your dashboard and live room access remain locked.
+                      </p>
+
+                      {/* Admin's exact rejection note */}
+                      <div className="mt-4 rounded-[10px] bg-surface border border-rose-500/20 p-3.5">
+                        <p className="text-[11px] text-muted uppercase font-semibold tracking-wider">
+                          Administrator Feedback / Reason:
+                        </p>
+                        <p className="mt-1 text-[13.5px] text-rose-300 font-medium">
+                          "{enrolment?.rejectionReason || 'Transaction reference not found in bank records. Please check and re-enter.'}"
+                        </p>
+                        {enrolment?.verifiedAt && (
+                          <p className="mt-1 text-[11px] text-faint">
+                            Reviewed on: {new Date(enrolment.verifiedAt).toLocaleString()}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Resubmit Payment Reference Form */}
+                      <form onSubmit={handleResubmitPaymentRef} className="mt-5 pt-4 border-t border-rose-500/20">
+                        <label htmlFor="resubmit-ref" className="block text-[13px] font-semibold text-fg">
+                          Resubmit Valid Payment Reference / UTR Number:
+                        </label>
+                        <p className="text-[12px] text-muted mt-0.5">
+                          Enter the correct 12-digit UPI UTR or bank transaction ID so the admin can verify your payment and approve your account.
+                        </p>
+
+                        <div className="mt-3 flex flex-col sm:flex-row items-center gap-2.5">
+                          <input
+                            id="resubmit-ref"
+                            type="text"
+                            placeholder="e.g. 12-digit UTR (430128912345)"
+                            value={newRefInput}
+                            onChange={(e) => setNewRefInput(e.target.value)}
+                            className="depth w-full rounded-[10px] bg-surface px-3.5 py-2.5 text-[13px] text-fg placeholder:text-muted/50 border border-line focus:border-accent focus:outline-none"
+                          />
+                          <button
+                            type="submit"
+                            disabled={isSubmittingRef || !newRefInput.trim()}
+                            className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-[10px] bg-accent px-5 py-2.5 text-[13px] font-semibold text-bg hover:bg-accent-2 transition-all disabled:opacity-50 shrink-0 cursor-pointer"
+                          >
+                            {isSubmittingRef ? (
+                              <RefreshCw className="size-4 animate-spin" />
+                            ) : (
+                              <Send className="size-3.5" />
+                            )}
+                            Resubmit for Verification
+                          </button>
+                        </div>
+
+                        {refSubmitMsg && (
+                          <p className="mt-2 text-[12px] text-accent-2">{refSubmitMsg}</p>
+                        )}
+                      </form>
+
+                      {/* Offline Payment Helper */}
+                      <div className="mt-4 pt-3 border-t border-rose-500/20 flex flex-wrap items-center justify-between gap-3 text-[12px]">
+                        <span className="text-muted">
+                          Official UPI: <strong className="font-mono text-fg">7488659839@upi</strong>
+                        </span>
+                        <a
+                          href={`https://wa.me/917488659839?text=${encodeURIComponent(
+                            `Hi, my payment verification failed for Enrolment ID: ${enrolment?.id}. Here is my payment receipt screenshot.`
+                          )}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-accent hover:underline font-medium"
+                        >
+                          <MessageCircle className="size-3.5" /> Send Receipt on WhatsApp for Help
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              ) : (
+                /* ----------------- STATE: PENDING APPROVAL ----------------- */
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rounded-card-sm bg-surface-2/70 border border-amber-500/30 p-5 sm:p-6"
+                >
+                  <div className="flex items-start gap-4">
+                    <div className="size-12 rounded-full bg-amber-500/15 border border-amber-500/30 grid place-items-center text-amber-400 shrink-0 shadow-[0_0_15px_rgba(255,184,0,0.2)]">
+                      <Lock className="size-6 text-amber-400" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/20 px-2.5 py-0.5 text-[11px] font-semibold text-amber-300 border border-amber-500/30">
+                          <span className="size-1.5 rounded-full bg-amber-400 animate-ping" />
+                          Pending Admin Verification
+                        </span>
+                        <span className="text-[12px] text-muted">ID: <strong className="font-mono text-fg">{enrolment?.id || 'ENR-STUDENT'}</strong></span>
+                      </div>
+
+                      <h4 className="text-[18px] font-semibold text-fg mt-2">
+                        Dashboard Access Locked
+                      </h4>
+                      <p className="text-[13px] text-muted mt-1 leading-relaxed">
+                        Your registration for <strong className="text-fg">{enrolment?.planLabel || 'Bootcamp'}</strong> (₹{enrolment?.amount?.toLocaleString() || '9,999'}) is awaiting offline payment verification by the administrator. All session materials and live classroom rooms will be unlocked as soon as your payment is approved.
+                      </p>
+
+                      {/* Payment summary grid */}
+                      <div className="mt-4 grid sm:grid-cols-2 gap-2.5 text-[12.5px]">
+                        <div className="rounded-[10px] bg-surface border border-line p-3">
+                          <p className="text-muted text-[11px] uppercase font-semibold">Offline Payment Beneficiary</p>
+                          <p className="font-semibold text-fg mt-0.5">LearnWithExpert / Anmol Gupta</p>
+                          <div className="mt-1 flex items-center justify-between">
+                            <span className="font-mono text-accent text-[13px]">7488659839@upi</span>
+                            <button
+                              type="button"
+                              onClick={handleCopyUpi}
+                              className="text-[11px] text-muted hover:text-fg underline cursor-pointer"
+                            >
+                              {copiedUpi ? 'Copied!' : 'Copy'}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="rounded-[10px] bg-surface border border-line p-3">
+                          <p className="text-muted text-[11px] uppercase font-semibold">Submitted Payment Reference</p>
+                          <p className="font-mono text-fg font-semibold mt-0.5 break-all">
+                            {enrolment?.paymentReference || 'None provided during signup'}
+                          </p>
+                          <p className="text-[11px] text-faint mt-1">Status: Awaiting bank match</p>
+                        </div>
+                      </div>
+
+                      {/* Update reference if missing or needs correction */}
+                      <form onSubmit={handleResubmitPaymentRef} className="mt-4 pt-3 border-t border-line">
+                        <label htmlFor="update-ref" className="block text-[12.5px] font-medium text-fg">
+                          {enrolment?.paymentReference ? 'Update Payment Reference / UTR Number:' : 'Enter Payment Reference / UTR to Expedite Verification:'}
+                        </label>
+                        <div className="mt-2 flex flex-col sm:flex-row items-center gap-2">
+                          <input
+                            id="update-ref"
+                            type="text"
+                            placeholder="e.g. 12-digit UPI UTR (430128912345)"
+                            value={newRefInput}
+                            onChange={(e) => setNewRefInput(e.target.value)}
+                            className="depth w-full rounded-[10px] bg-surface px-3 py-2 text-[13px] text-fg placeholder:text-muted/50 border border-line focus:border-accent focus:outline-none"
+                          />
+                          <button
+                            type="submit"
+                            disabled={isSubmittingRef || !newRefInput.trim()}
+                            className="inline-flex w-full sm:w-auto items-center justify-center gap-1.5 rounded-[10px] bg-white/[0.08] hover:bg-white/[0.14] border border-line px-4 py-2 text-[12.5px] font-semibold text-fg transition-all disabled:opacity-50 shrink-0 cursor-pointer"
+                          >
+                            {isSubmittingRef ? <RefreshCw className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+                            Save Reference
+                          </button>
+                        </div>
+                        {refSubmitMsg && <p className="mt-1.5 text-[12px] text-emerald-400">{refSubmitMsg}</p>}
+                      </form>
+
+                      {/* Check status button and WhatsApp assistance */}
+                      <div className="mt-5 pt-4 border-t border-line flex flex-col sm:flex-row items-center justify-between gap-3">
+                        <button
+                          type="button"
+                          onClick={handleManualRefresh}
+                          disabled={isRefreshing}
+                          className="inline-flex items-center gap-2 rounded-[10px] bg-accent px-4 py-2 text-[13px] font-semibold text-bg hover:bg-accent-2 transition-all cursor-pointer shadow-[0_4px_16px_rgba(255,122,69,0.3)] disabled:opacity-60"
+                        >
+                          <RefreshCw className={cx('size-3.5', isRefreshing && 'animate-spin')} />
+                          Check Approval Status
+                        </button>
+
+                        <a
+                          href={`https://wa.me/917488659839?text=${encodeURIComponent(
+                            `Hi! I registered for Cohort 7 (ID: ${enrolment?.id || ''}, Email: ${user.email}). I made the offline payment via UPI. Please verify and approve my account.`
+                          )}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-[12.5px] text-emerald-400 hover:underline font-medium"
+                        >
+                          <MessageCircle className="size-4" /> Fast-track on WhatsApp
+                        </a>
+                      </div>
+
+                      {refreshNotice && (
+                        <p className="mt-2 text-[12px] text-emerald-400 text-center sm:text-left">{refreshNotice}</p>
+                      )}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </div>
+          ) : (
+            /* ----------------- FULL UNLOCKED DASHBOARD (APPROVED) ----------------- */
+            <>
 
           {/* VIEW 1: LIVE CLASSROOM & MEETING ROOM */}
           {activeView === 'live_room' && (
@@ -676,6 +956,8 @@ Official ID: ${enrolment?.id || 'ENR-STUDENT'}
               </div>
             </>
           )}
+        </>
+      )}
 
           {/* Footer Actions */}
           <div className="mt-8 flex items-center justify-between border-t border-line pt-4">

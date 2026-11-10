@@ -1,12 +1,15 @@
 import { AnimatePresence, motion } from 'motion/react'
 import {
   ChevronDown,
+  Clock,
   LayoutDashboard,
+  Lock,
   LogOut,
   Menu,
   Shield,
   Sparkles,
   X,
+  XCircle,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
@@ -21,7 +24,7 @@ export interface NavProps {
 }
 
 export function Nav({ onOpenAuth }: NavProps) {
-  const { user, isAuthenticated, isAdmin, logout, openAuthModal, openJoinCohort, openDashboard, openAdminPortal } = useAuth()
+  const { user, enrolment, isAuthenticated, isAdmin, isApproved, logout, openAuthModal, openJoinCohort, openDashboard, openAdminPortal } = useAuth()
   const [scrolled, setScrolled] = useState(false)
   const [open, setOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
@@ -124,10 +127,30 @@ export function Nav({ onOpenAuth }: NavProps) {
                     <div className="border-b border-line px-3 py-2.5">
                       <p className="text-[13.5px] font-semibold text-fg truncate">{user.name}</p>
                       <p className="text-[11.5px] text-muted truncate">{user.email}</p>
-                      <span className="mt-1.5 inline-flex items-center gap-1 rounded-[6px] bg-accent/15 px-2 py-0.5 text-[10.5px] font-medium text-accent border border-accent/20">
-                        <Sparkles className="size-3" />
-                        {user.cohort}
-                      </span>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        <span className="inline-flex items-center gap-1 rounded-[6px] bg-accent/15 px-2 py-0.5 text-[10.5px] font-medium text-accent border border-accent/20">
+                          <Sparkles className="size-3" />
+                          {user.cohort}
+                        </span>
+                        {!isAdmin && (
+                          isApproved ? (
+                            <span className="inline-flex items-center gap-1 rounded-[6px] bg-emerald-500/15 px-2 py-0.5 text-[10.5px] font-medium text-emerald-400 border border-emerald-500/30">
+                              <span className="size-1.5 rounded-full bg-emerald-400" />
+                              Approved
+                            </span>
+                          ) : enrolment?.status === 'rejected' ? (
+                            <span className="inline-flex items-center gap-1 rounded-[6px] bg-rose-500/15 px-2 py-0.5 text-[10.5px] font-medium text-rose-400 border border-rose-500/30">
+                              <XCircle className="size-3" />
+                              Rejected
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-[6px] bg-amber-500/15 px-2 py-0.5 text-[10.5px] font-medium text-amber-300 border border-amber-500/30">
+                              <Clock className="size-2.5 animate-spin" />
+                              Pending Verification
+                            </span>
+                          )
+                        )}
+                      </div>
                     </div>
 
                     <div className="py-1">
@@ -152,8 +175,22 @@ export function Nav({ onOpenAuth }: NavProps) {
                           }}
                           className="flex w-full items-center gap-2.5 rounded-[10px] px-3 py-2 text-[13px] text-fg/90 hover:bg-white/[0.06] hover:text-fg transition-colors cursor-pointer text-left"
                         >
-                          <LayoutDashboard className="size-4 text-accent" />
-                          <span>Student Dashboard</span>
+                          {isApproved ? (
+                            <>
+                              <LayoutDashboard className="size-4 text-emerald-400" />
+                              <span>Student Dashboard</span>
+                            </>
+                          ) : enrolment?.status === 'rejected' ? (
+                            <>
+                              <XCircle className="size-4 text-rose-400" />
+                              <span>Check Rejection Reason</span>
+                            </>
+                          ) : (
+                            <>
+                              <Lock className="size-4 text-amber-400" />
+                              <span>Check Approval Status</span>
+                            </>
+                          )}
                         </button>
                       )}
                     </div>

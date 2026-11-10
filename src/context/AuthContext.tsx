@@ -23,8 +23,13 @@ export interface Enrolment {
   plan: 'bootcamp_full' | 'bootcamp_instalment' | 'recordings' | 'team'
   planLabel: string
   amount: number
-  status: 'confirmed' | 'pending' | 'waitlist'
+  status: 'approved' | 'pending' | 'rejected' | 'confirmed' | 'waitlist'
   workflowGoal: string
+  paymentMethod?: string
+  paymentReference?: string
+  rejectionReason?: string
+  verifiedAt?: string
+  verifiedBy?: string
   enrolledAt: string
 }
 
@@ -45,6 +50,8 @@ interface EnrolData {
   password?: string
   plan: 'bootcamp_full' | 'bootcamp_instalment' | 'recordings' | 'team'
   workflowGoal: string
+  paymentReference?: string
+  paymentMethod?: string
 }
 
 interface AuthContextType {
@@ -53,6 +60,7 @@ interface AuthContextType {
   token: string | null
   isAuthenticated: boolean
   isAdmin: boolean
+  isApproved: boolean
   isLoading: boolean
 
   // Modals
@@ -72,6 +80,8 @@ interface AuthContextType {
   closeDashboard: () => void
   openAdminPortal: () => void
   closeAdminPortal: () => void
+  refreshAuth: () => Promise<void>
+  resubmitPaymentReference: (paymentReference: string, paymentMethod?: string) => Promise<{ ok: boolean; error?: string }>
 
   // API calls
   login: (email: string, password: string, rememberMe?: boolean) => Promise<{ ok: boolean; error?: string; isAdmin?: boolean }>
@@ -366,6 +376,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  const isApproved = user?.role === 'admin' || enrolment?.status === 'approved' || enrolment?.status === 'confirmed'
+
+  const refreshAuth = async () => {
+    if (!token) return
+    try {
+      const res = await fetch('/api/auth/me', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = (await res.json()) as ApiResponse
+      if (data.ok && data.user) {
+        setUser(data.user)
+        localStorage.setItem(USER_KEY, JSON.stringify(data.user))
+        if (data.enrolment) {
+          setEnrolment(data.enrolment)
+          localStorage.setItem(ENROLMENT_KEY, JSON.stringify(data.enrolment))
+        }
+      }
+    } catch {}
+  }
+
+  const resubmitPaymentReference = async (paymentReference: string, paymentMethod = 'offline') => {
+    if (!token && !enrolment) return { ok: false, error: 'Authentication required' }
+    try {
+      const res = await fetch('/api/enrol/resubmit-payment', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          enrolmentId: enrolment?.id,
+          paymentReference,
+          paymentMethod,
+        }),
+      })
+      const data = (await res.json()) as ApiResponse
+      if (res.ok && data.ok && data.enrolment) {
+        setEnrolment(data.enrolment)
+        localStorage.setItem(ENROLMENT_KEY, JSON.stringify(data.enrolment))
+        return { ok: true }
+      }
+      return { ok: false, error: data.error || 'Failed to update payment reference.' }
+    } catch {
+      return { ok: false, error: 'Network error. Please try again.' }
+    }
+  }
+
   const logout = async () => {
     try {
       if (token) {
@@ -394,6 +451,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         token,
         isAuthenticated: !!user,
         isAdmin: user?.role === 'admin',
+        isApproved,
         isLoading,
         isAuthModalOpen,
         authModalMode,
@@ -409,6 +467,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         closeDashboard,
         openAdminPortal,
         closeAdminPortal,
+        refreshAuth,
+        resubmitPaymentReference,
         login,
         register,
         enrolStudent,
